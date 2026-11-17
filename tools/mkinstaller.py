@@ -1,7 +1,8 @@
 """Generate dist/aquafinder.sh: a self-contained Panther shell script that
-installs/restores two independent components on an iBook:
+installs/restores independent components on an iBook:
 
-  finder     Aqua (non-brushed-metal) Finder windows with toolbar + sidebar
+  finder     Aqua (non-brushed-metal) Finder windows with toolbar + sidebar,
+             and the status bar under the toolbar (Jaguar)
   titlebars  Jaguar's pinstriped, translucent title bars (theme Extras.rsrc,
              plus AppKit so Cocoa windows can show the translucency)
   logo       Jaguar branding: the Garamond "Mac OS X" wordmark in About This
@@ -9,13 +10,15 @@ installs/restores two independent components on an iBook:
 """
 import sys, hashlib, os
 sys.path.insert(0, os.path.dirname(__file__))
-import patch, theme, appkit_patch, logo
+import patch, theme, appkit_patch, logo, grip
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 FINDER_PATH = '/System/Library/CoreServices/Finder.app/Contents/MacOS/Finder'
 THEME_PATH = ('/System/Library/Frameworks/Carbon.framework/Versions/A/Frameworks/'
               'HIToolbox.framework/Versions/A/Resources/Extras.rsrc')
 APPKIT_PATH = '/System/Library/Frameworks/AppKit.framework/Versions/C/AppKit'
+GRIP_PATH = '/System/Library/CoreServices/Finder.app/Contents/Resources/Finder.rsrc'
+GRIP_SRC = 'orig/Finder.rsrc'                        # 10.3.9 (same as 10.3.4's)
 FINDER_BUILDS = [('10.3.9', 'orig/Finder-10.3.9')]
 APPKIT_SRC = 'orig/appkit/AppKit-10.3.9'             # stock, from the 10.3.9 Combo
 THEME_SRC = 'theme/panther-10.3.9/Extras.rsrc'      # unchanged since 10.3.0 (the Combo doesn't ship it)
@@ -65,7 +68,7 @@ def text_region(path, a, b):
     """4 KiB-aligned block span covering __TEXT from its first section on.
     update_prebinding rewrites the header/load commands and __DATA pointers
     but never the code, so this identifies a Finder build however often it
-    has been re-prebound -- and it covers the gradient routine that lives in
+    has been re-prebound -- and it covers the bar routine that lives in
     __TEXT's tail padding. It starts at the first whole block after the
     first section's start, not after the load commands: re-prebinding
     against newer dylibs (QuickTime 7.5 pulls in Accelerate, AudioToolbox...)
@@ -85,18 +88,29 @@ def text_region(path, a, b):
 entries = []   # (component, key, label, skip, count, orig md5, patched md5, edit lines)
 for ver, rel in FINDER_BUILDS:
     src = os.path.join(ROOT, rel)
+    key, lbl = 'finder' + ver.replace('.', ''), 'Finder ' + ver
+    a = open(src, 'rb').read()
     out = os.path.join(ROOT, 'build', 'Finder-%s-slim' % ver)
     patch.apply(src, out, quiet=True)
-    a, b = open(src, 'rb').read(), open(out, 'rb').read()
+    b = open(out, 'rb').read()
     skip, count, mo, mp = text_region(src, a, b)
-    entries.append(('finder', 'finder' + ver.replace('.', ''), 'Finder ' + ver, skip, count, mo, mp, edit_lines(a, b)))
+    entries.append(('finder', key, lbl, skip, count, mo, mp, edit_lines(a, b)))
+
+# The Finder's resources: the sidebar divider's image, the column view's
+# divider instead of the metal dimple (installed and restored with the Finder).
+a = open(os.path.join(ROOT, GRIP_SRC), 'rb').read()
+b = grip.build(a)
+entries.append(('grip', 'finderrsrc', 'Finder divider grip', 0, 0, md5(a), md5(b), edit_lines(a, b)))
 
 theme_out = os.path.join(ROOT, 'build', 'Extras-jaguarbars.rsrc')
 import contextlib, io
 with contextlib.redirect_stdout(io.StringIO()):
     theme.transplant(os.path.join(ROOT, THEME_SRC), os.path.join(ROOT, JAGUAR_SRC), theme_out, THEME_IDS)
-    # loading spinner art 16 -> 13 px, so it fits the 15 px bottom bar
+    # loading spinner art 16 -> 13 px (it was sized for the 15 px bottom bar)
     theme.shrink_frames(theme_out, theme_out, 390, 13, 2)
+    # toolbar background brush -> Jaguar's pinstripes, as the toolbar art above
+    # (the Finder erases the status bar with it)
+    theme.jaguar_toolbar_brush(theme_out, theme_out)
 a, b = open(os.path.join(ROOT, THEME_SRC), 'rb').read(), open(theme_out, 'rb').read()
 entries.append(('titlebars', 'theme', 'Panther theme', 0, 0, md5(a), md5(b), edit_lines(a, b)))
 
@@ -136,7 +150,7 @@ def ident_block(comp):
         out.append("    %s) KEY=%s; LABEL='%s'; STATE=original; SKIP=%d; COUNT=%d; WANT=%s; ORIG=%s; return ;;" % (o, key, lbl, skip, count, n, o))
         out.append("    %s) KEY=%s; LABEL='%s'; STATE=patched;  SKIP=%d; COUNT=%d; WANT=%s; ORIG=%s; return ;;" % (n, key, lbl, skip, count, n, o))
         for k, sk, cn, h in released:
-            if k == key and h != n:
+            if k in (key, key + 'top') and h != n:
                 if (sk, cn) != (skip, count):   # an old release hashed a different span
                     out.append('  esac')
                     out.append('  R2=$(region "$1" %d %d)' % (sk, cn))
@@ -147,8 +161,10 @@ def ident_block(comp):
                     out.append('  case "$R" in')
         out.append('  esac')
     return '\n'.join(out)
-known_finder, known_theme, known_appkit = ident_block('finder'), ident_block('titlebars'), ident_block('appkit')
+known_finder = ident_block('finder')
+known_theme, known_appkit = ident_block('titlebars'), ident_block('appkit')
 known_logo = ident_block('logo')
+known_grip = ident_block('grip')
 logo_paths = ' '.join(p for k, l, p, s in LOGO_FILES)
 assert ' ' not in ''.join(p for k, l, p, s in LOGO_FILES), 'LOGO_FILES is word-split in sh'
 edits = '\n'.join("  %s)\n%s\n    ;;" % (key, e) for c, key, lbl, sk, cn, o, n, e in entries)
@@ -157,7 +173,9 @@ script = r'''#!/bin/sh
 # Aquafinder for Mac OS X 10.3.9 (Panther).
 #
 #   finder     Aqua (non-brushed-metal) Finder windows that keep toolbar + sidebar,
-#              a Jaguar-style soft shadow for the bottom bar and softer pane borders
+#              the status bar under the toolbar as in Jaguar, and a sidebar divider
+#              drawn like the column view's (plus the Finder's resources: the
+#              divider's image)
 #   titlebars  Jaguar-style pinstriped, translucent window title bars
 #              (the HIToolbox theme, plus AppKit so Cocoa windows blend too)
 #
@@ -177,6 +195,7 @@ PATH=/bin:/sbin:/usr/bin:/usr/sbin; export PATH
 FINDER="${FINDER:-__FINDER__}"
 THEME="${THEME:-__THEME__}"
 APPKIT="${APPKIT:-__APPKIT__}"
+GRIP="${GRIP:-__GRIP__}"
 BACKUP_DIR="${BACKUP_DIR:-/Library/Aquafinder}"
 OLD_BACKUP_DIR=/Library/PantherSlim   # backups made under the old name
 
@@ -202,6 +221,7 @@ identify() {   # identify <file> <component>: sets KEY LABEL STATE SKIP COUNT WA
     finder)    identify_finder "$1" ;;
     titlebars) identify_theme "$1" ;;
     appkit)    identify_appkit "$1" ;;
+    grip)      identify_grip "$1" ;;
     logo)      identify_logo "$1" ;;
   esac
 }
@@ -216,6 +236,9 @@ __KNOWN_APPKIT__
 }
 identify_logo() {
 __KNOWN_LOGO__
+}
+identify_grip() {
+__KNOWN_GRIP__
 }
 LOGO_FILES="${LOGO_FILES:-__LOGO_PATHS__}"   # each is a separate file; status/install/restore go through all
 
@@ -293,7 +316,7 @@ need_root() {
 
 finish() {
   [ -n "$NO_RESTART" ] && return 0
-  case "$CHANGED" in *finder*)
+  case "$CHANGED" in *finder*|*grip*)
     # no killall without the optional BSD Subsystem; ps is in /bin
     for P in $(ps -axc | awk '$NF == "Finder" {print $1}'); do kill "$P" 2>/dev/null; done
     echo "Finder restarted." ;;
@@ -318,18 +341,19 @@ CHANGED=; RC=0
 case "$1" in
   install)
     need_root install
-    want finder    && { install_one "$FINDER" finder || RC=1; }
+    want finder    && { install_one "$FINDER" finder || RC=1; install_one "$GRIP" grip || RC=1; }
     want titlebars && { install_one "$THEME" titlebars || RC=1; install_one "$APPKIT" appkit || RC=1; }
     want logo      && for F in $LOGO_FILES; do install_one "$F" logo || RC=1; done
     finish ;;
   restore|uninstall)
     need_root restore
-    want finder    && { restore_one "$FINDER" finder || RC=1; }
+    want finder    && { restore_one "$FINDER" finder || RC=1; restore_one "$GRIP" grip || RC=1; }
     want titlebars && { restore_one "$THEME" titlebars || RC=1; restore_one "$APPKIT" appkit || RC=1; }
     want logo      && for F in $LOGO_FILES; do restore_one "$F" logo || RC=1; done
     finish ;;
   status|"")
     status_one "$FINDER" finder
+    status_one "$GRIP" grip
     status_one "$THEME" titlebars
     status_one "$APPKIT" appkit
     for F in $LOGO_FILES; do status_one "$F" logo; done ;;
@@ -337,8 +361,8 @@ case "$1" in
 esac
 exit $RC
 '''
-script = (script.replace('__KNOWN_FINDER__', known_finder).replace('__KNOWN_THEME__', known_theme).replace('__KNOWN_APPKIT__', known_appkit).replace('__KNOWN_LOGO__', known_logo).replace('__LOGO_PATHS__', logo_paths).replace('__EDITS__', edits)
-          .replace('__FINDER__', FINDER_PATH).replace('__THEME__', THEME_PATH).replace('__APPKIT__', APPKIT_PATH))
+script = (script.replace('__KNOWN_FINDER__', known_finder).replace('__KNOWN_THEME__', known_theme).replace('__KNOWN_APPKIT__', known_appkit).replace('__KNOWN_LOGO__', known_logo).replace('__KNOWN_GRIP__', known_grip).replace('__LOGO_PATHS__', logo_paths).replace('__EDITS__', edits)
+          .replace('__FINDER__', FINDER_PATH).replace('__THEME__', THEME_PATH).replace('__APPKIT__', APPKIT_PATH).replace('__GRIP__', GRIP_PATH))
 os.makedirs(os.path.join(ROOT, 'dist'), exist_ok=True)
 path = os.path.join(ROOT, 'dist', 'aquafinder.sh')
 open(path, 'w').write(script)

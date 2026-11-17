@@ -8,14 +8,15 @@ Make Mac OS X 10.3.9 Panther look and fit better on small screens, like 800×600
 
 **Finder**
 - Plain Aqua windows instead of brushed metal. The toolbar and sidebar stay.
-- A thinner bottom bar (15 px, the same height as the resize corner) with a soft Jaguar-style shadow.
-- Lighter, softer lines around the panes.
+- As in Jaguar, the item count sits under the toolbar, between two thin lines, instead of in a
+  bar at the bottom. The sidebar and files run to the bottom of the window, and the resize corner
+  sits in the scroll bar's corner as in any Aqua window.
+- The sidebar divider looks like the column view's dividers, as in Jaguar: a soft 15 px gray
+  gradient with its grip near the bottom, and no other lines around the panes. Collapse the
+  sidebar and the divider stays at the window's left edge, so you can drag it back out.
 - The sidebar divider redraws cleanly when you drag it or resize the window.
-- A smaller loading spinner (13 px) that fits the thinner bar. It comes from the system theme,
-  so it's installed with the title bars and every spinner in the system gets the same size.
-
-![Bottom bar: stock (top) and Aquafinder (bottom)](screens/bottom-bar.png)
-![Loading spinner in the bottom bar](screens/11-spinner.png)
+- A smaller loading spinner (13 px). It comes from the system theme, so it's installed with the
+  title bars and every spinner in the system gets the same size.
 
 **Title bars**
 - Pinstriped title bars from Jaguar (10.2) in every app.
@@ -79,9 +80,7 @@ Then restart. The original files are kept in `/Library/Aquafinder/`.
 - Only works on **Mac OS X 10.3.9**. On anything else the script does nothing.
 - The script checks every file before it changes it, keeps a backup, and checks the result.
 - It needs nothing beyond a standard Panther install.
-- Tested in QEMU, including with Quartz Extreme on an emulated Radeon 9000:
-
-  ![Finder with Quartz Extreme](screens/10-qe-finder.png)
+- Tested in QEMU, including with Quartz Extreme on an emulated Radeon 9000.
 
 ## More screenshots
 

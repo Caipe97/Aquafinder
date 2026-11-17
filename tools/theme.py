@@ -73,3 +73,41 @@ def shrink_frames(in_path, out_path, res_id, size, offset):
     data = rf.patched_in_place({key: new})
     assert ResFile(data).res[key]['data'] == new
     open(out_path, 'wb').write(data)
+
+
+
+TOOLBAR_PPAT = 2137    # kThemeBrushToolbarBackground (Panther: 247/244 pinstripes)
+# Jaguar's toolbar pinstripes (pxm# 4330: 250, 255, 250, 233 from its top),
+# in the row order that puts them in phase with a Finder window's toolbar:
+# the brush pattern starts at the content's port origin, the toolbar art at
+# the window top, one row apart modulo 4.
+JAGUAR_TOOLBAR_ROWS = [233, 250, 255, 250]
+
+
+def jaguar_toolbar_brush(in_path, out_path, res_id=TOOLBAR_PPAT, rows=JAGUAR_TOOLBAR_ROWS):
+    """Repaint the toolbar background brush (a 2-bit 'ppat' of solid rows) with
+    Jaguar's pinstripes, so what the Finder erases with it (the sidebar
+    divider, the status bar under the toolbar) matches the transplanted
+    toolbar art. Same size and layout: only the color table and pixels change."""
+    import struct
+    rf = ResFile(open(in_path, 'rb').read())
+    key = ('ppat', res_id)
+    d = bytearray(rf.res[key]['data'])
+    pat_type, map_off, data_off = struct.unpack_from('>HII', d, 0)
+    assert pat_type == 1, 'not a full-color pattern'
+    row_bytes = struct.unpack_from('>H', d, map_off + 4)[0] & 0x3fff
+    t, l, b, r = struct.unpack_from('>4h', d, map_off + 6)
+    pixel_size = struct.unpack_from('>H', d, map_off + 32)[0]
+    ct = struct.unpack_from('>I', d, map_off + 42)[0]
+    size = struct.unpack_from('>H', d, ct + 6)[0]
+    assert pixel_size == 2 and size + 1 >= 4 and (b - t) % len(rows) == 0, 'unexpected brush layout'
+    grays = sorted(set(rows))
+    assert len(grays) <= 3
+    for k, g in enumerate(grays, start=1):           # entries 1..3 (0 stays black)
+        struct.pack_into('>4H', d, ct + 8 + 8 * k, k, g * 0x101, g * 0x101, g * 0x101)
+    for y in range(b - t):
+        v = grays.index(rows[y % len(rows)]) + 1
+        d[data_off + y * row_bytes:data_off + (y + 1) * row_bytes] = bytes([v * 0x55]) * row_bytes
+    data = rf.patched_in_place({key: bytes(d)})
+    assert ResFile(data).res[key]['data'] == bytes(d)
+    open(out_path, 'wb').write(data)

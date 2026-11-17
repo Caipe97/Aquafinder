@@ -6,13 +6,16 @@ copies -- re-prebound ones, and other builds such as 10.3.4 whose code has
 moved -- are matched by masked instruction signatures, which
 update_prebinding never changes; every site must match exactly once.
 
-usage: patch.py <in-finder> <out-finder> [set,set,...]   (default: all sets)
+usage: patch.py <in-finder> <out-finder> [set,set,...]   (default: SET_NAMES)
+The status bar sits under the toolbar ('topbar'), as in Jaguar; the bottom
+bar layout is gone.
 """
 import sys, struct
 sys.path.insert(0, __file__.rsplit('/', 1)[0])
 from macho import MachO
 
 LI_R4_METAL, LI_R4_0, LI_R4_1 = 0x38800100, 0x38800000, 0x38800001
+NOP = 0x60000000
 
 # (set, ref_addr in 10.3.9, expected word or None for "any bl/bc", action, comment)
 #   action: int           -> write this literal word
@@ -28,32 +31,71 @@ PATCHES = [
     # View background eraser (status bar etc.) always takes the Aqua
     # SetThemeBackground+EraseRect branch instead of painting metal.
     ('statusbar', 0x23b0c, 0x419e0084, ('always',), 'EraseViewBackground: beq aqua -> b aqua'),
-    # Splitter gap / framed box: EraseRgn(rgn) instead of
-    # DrawWindowMetalOverContentRelativeRegion(window, rgn).
-    # The splitter repaint (sidebar divider drag) runs inside QDBeginCGContext,
-    # where QuickDraw erasing is never seen; fill the clipped CGRect white via
-    # CoreGraphics instead (helper placed in the dead metal branch of
-    # EraseViewBackground, see place_fill()).
-    ('gap', 0x4e7a0, 0x7d8903a6, 0x80610074, 'splitter repaint: mtctr (GetMacWindow) -> lwz r3,cgctx'),
-    ('gap', 0x4e7a4, 0x4e800421, 0x388100b0, 'splitter repaint: bctrl -> addi r4,r1,clipped CGRect'),
-    ('gap', 0x4e7a8, 0x808100c4, 0x38a100d0, 'splitter repaint: lwz r4,rgn -> addi r5,r1,view CGRect'),
-    ('gap', 0x4e7ac, None, ('bl_fill',), 'splitter repaint: bl DrawWindowMetal... -> bl CGFillRectWhite'),
-    # Jaguar-style soft shadow instead of the flat bottom bar and its 1px line:
-    # the Aqua erase branch jumps to a gradient routine (tools/cave.py) placed
-    # in the free space at the end of __TEXT.
-    ('shadow', 0x23b90, 0x38600034, ('cave',), 'status bar erase: li r3,0x34 -> b <gradient routine>'),
-    # Softer 1px pane borders: both loads of the 0.6 gray (153) read the
-    # gradient's darkest tone (212/255) from the cave instead. The panes'
-    # bottom border sits directly on the bar, so it becomes the gradient's
-    # first row (212, then the bar's 216, 220, ...), aligned with the side
-    # borders and repainted with the frame (no stale pixels when dragging).
-    ('softlines', 0x2d6f4, 0xc022fef4, ('lfs_gray',), 'pane frame fill gray 0.6 -> 212/255'),
-    ('softlines', 0x19fac0, 0xc022fef4, ('lfs_gray',), 'framed box stroke gray 0.6 -> 212/255'),
+    # Sidebar divider (and the gap it leaves while dragged): it showed the
+    # window's metal; nothing erases it in an Aqua window. Both its draw
+    # routine and the splitter repaint draw inside a QDBeginCGContext bracket,
+    # where QuickDraw erasing is never seen, so each `bl GetWindowPort` that
+    # opens the bracket goes through DividerErase first, which erases the
+    # divider white (cave.build_divider_erase, placed in the dead metal
+    # branch of EraseViewBackground, see place_divider_erase).
+    ('gap', 0x22420, None, ('bl_divider',), 'divider draw: bl GetWindowPort -> bl DividerErase'),
+    ('gap', 0x4e6bc, None, ('bl_divider',), 'splitter repaint: bl GetWindowPort -> bl DividerErase'),
+    ('gap', 0x4e7ac, None, NOP, 'splitter repaint: bl DrawWindowMetal... -> nop (erased already)'),
+    # The divider, drawn like the column view's dividers (Jaguar's too): a
+    # 15 px gray gradient with the || grip near its bottom. Its frame (the
+    # rect at view+0xd4) is 13 px instead of 7, plus the panes' 1px outset
+    # columns on either side: every 7 in the window layout becomes 13.
+    ('gap', 0x4816c, 0x38840007, 0x3884000d, 'layout: file pane x = sidebar + 3 + 7 -> + 13'),
+    ('gap', 0x48198, 0x3884fff9, 0x3884fff3, 'layout: file pane width -= 7 -> 13'),
+    ('gap', 0x48388, 0x38420007, 0x3842000d, 'layout: divider right = left + 7 -> + 13'),
+    ('gap', 0x48a8c, 0x38420007, 0x3842000d, 'resize: room for the divider 7 -> 13'),
+    ('gap', 0x48ab0, 0x3842fff9, 0x3842fff3, 'resize: sidebar width -= 7 -> 13'),
+    ('gap', 0x48c34, 0x3be20007, 0x3be2000d, 'layout: file pane x = sidebar + 3 + 7 -> + 13'),
+    ('gap', 0x48cdc, 0x3863fff9, 0x3863fff3, 'layout: widest sidebar -= 7 -> 13'),
+    # With the sidebar collapsed (dragged all the way left), the divider
+    # stays at the window's left edge as a handle: 5 px there, 13 now too, so
+    # its gradient doesn't spill over the files.
+    ('gap', 0x4839c, 0x38000005, 0x3800000d, 'layout, sidebar collapsed: divider right = 5 -> 13'),
+    ('gap', 0x48c1c, 0x3bfe0005, 0x3bfe000d, 'layout, sidebar collapsed: file pane x = 1 + 5 -> + 13'),
+    # The gradient and grip are the grip image (tools/grip.py: 15 x 2048,
+    # grip in its bottom rows). The draw centered it in the divider; now its
+    # x stays centered (15 over 13: one column out on each side), but it
+    # starts at the divider's bottom, and is clipped to the divider's own
+    # height, less its top row, so it never reaches the row under the status
+    # bar:
+    #   CGContextClipToRect(ctx, {x - 1, bottom, 15, divider height - 1})
+    #   CGContextDrawImage(ctx, {x - 1, bottom, 15, 2048}, image)
+    # (the y centering is dead now; its words compute the clip's height,
+    # the divider's minus its top row: the row under the status bar's line
+    # stays white, as above the column view's dividers)
+    ('gap', 0x22534, 0xd121007c, 0xed8c0028, 'grip draw: height = image height -> fsubs f12,f12,f0 (h - 0.5)'),
+    ('gap', 0x22538, 0xed8c5838, 0xed8c0028, 'grip draw: y centering -> fsubs f12,f12,f0 (h - 1)'),
+    ('gap', 0x22540, 0xc0010074, 0xd181007c, 'grip draw: lfs f0,y -> stfs f12,height (clip: h - 1)'),
+    ('gap', 0x22550, 0xd0010074, 0x7c9d84aa, 'grip draw: y += centering -> lswi r4,r29,16 (the clip rect)'),
+    ('gap', 0x22554, 0x801e0000, ('bl_new', '_CGContextClipToRect'), 'grip draw: -> bl CGContextClipToRect'),
+    ('gap', 0x22558, 0x7cbd84aa, 0x80610044, 'grip draw: -> lwz r3,ctx'),
+    ('gap', 0x2255c, 0x7ca285aa, 0x7c9d84aa, 'grip draw: -> lswi r4,r29,16 (the image rect)'),
+    ('gap', 0x22560, 0x7c080378, 0x3ce04500, 'grip draw: -> lis r7,0x4500 (height 2048.0f)'),
+    ('gap', 0x22564, 0x7c8284aa, 0x811e0000, 'grip draw: -> lwz r8,image'),
+    # No pane outlines: the gradient's own edges are the only lines.
+    ('gap', 0x22584, None, NOP, "divider draw: outline the sidebar -> nothing"),
+    ('gap', 0x22594, None, NOP, "divider draw: outline the file pane -> nothing"),
+    # The status bar's erase: the Aqua branch jumps to cave.build_topbar
+    # (placed in the free space at the end of __TEXT): the Aqua erase, the
+    # toolbar's pinstripes, plus Jaguar's 1px lines above and below the bar.
+    ('shadow', 0x23b90, 0x38600034, ('cave',), 'status bar erase: li r3,0x34 -> b <bar routine>'),
+    # Softer 1px lines: the loads of the 0.6 gray (153) read 212/255 (as
+    # Jaguar's pane borders) from the cave instead.
+    ('softlines', 0x2d6f4, 0xc022fef4, ('lfs_gray', 'gray'), 'pane frame fill gray 0.6 -> 212/255'),
+    ('softlines', 0x19fac0, 0xc022fef4, ('lfs_gray', 'gray'), 'framed box stroke gray 0.6 -> 212/255'),
     # Bottom bar 15 rows instead of 18, the height of the resize handle (no
     # white rows above it; the file list gains 3 rows). The window layout
-    # subtracts this from the content height when the bar is at the bottom.
-    # Keep in sync with cave.BAR_HEIGHT (the gradient table's length).
-    ('slimbar', 0x48958, 0x38000012, 0x3800000f, 'window layout: bottom bar height 18 -> 15'),
+    # subtracts this from the content height when the bar is at the bottom:
+    # 14, so the panes overlap the bar's top row and their 1px bottom border
+    # is that row (212, as in Jaguar). The list's scroll bar then ends right
+    # above the resize handle, with no extra line between them.
+    # ('topbar' replaces the layout's 14 and leaves the bottom rect branch dead.)
+    ('slimbar', 0x48958, 0x38000012, 0x3800000e, 'window layout: bottom bar height 18 -> 15, panes overlap its top row'),
     ('slimbar', 0x2ae30, 0x3842ffee, 0x3842fff1, 'status bar rect: top = bottom - 18 -> - 15'),
     ('slimbar', 0x2ae48, 0x38420012, 0x3842000f, 'status bar rect: bottom = top + 18 -> + 15'),
     # loading spinner (16x16 theme art, drawn bottom-aligned in its rect): the
@@ -61,17 +103,51 @@ PATCHES = [
     # canvas on the border line + bar; the theme's arrows are shrunk to 13 px
     # (theme.shrink_frames) so they sit on bar rows 1..13.
     ('slimbar', 0x1605c, 0x39290010, 0x3929000e, 'status bar spinner: bottom = top + 16 -> + 14'),
+    # With the bar at the bottom, the panes' content view is one column wider
+    # than the window, so the panes' right border line falls outside it and
+    # the list's scroll bar ends on the window edge, in line with the resize
+    # handle below it (as in Aqua windows). r28 = 1 when the bar is at the
+    # bottom, 0 otherwise; the width is never negative, so no sign extension.
+    ('slimbar', 0x48974, 0x7c840734, 0x7c84e214, 'window layout: content width -> width + (bar at bottom)'),
+    # The status bar under the toolbar, as in Jaguar, instead of at the
+    # bottom. Browser windows use the top status bar that windows without a
+    # toolbar already have (20 rows, full width); the panes start below it
+    # and run to the window bottom, where the resize handle sits in the list's
+    # scroll bar corner as in any Aqua window. Needs 'shadow' and 'slimbar'.
+    ('topbar', 0x2ae10, 0x419e0060, ('always',), 'status bar rect: beq bottom rect -> b top rect'),
+    ('topbar', 0x488c4, 0x409e0014, 0x60000000, 'window layout: top offset for the bar in browser windows too'),
+    # replaces slimbar's 14 (applied first): content height = rest + 1, so the
+    # panes' bottom border falls outside the window, like the right one
+    ('topbar', 0x48958, 0x3800000e, 0x3800ffff, 'window layout: bottom bar height 14 -> -1'),
+    # The icon view's scroller reclaims the resize handle's corner when the
+    # window has a toolbar (its bottom bar held the handle); leave it free as
+    # without a toolbar, so the scroll bar stops above the handle.
+    ('topbar', 0x3cd50, 0x809f02bc, 0x38800000, 'icon view scroller: reclaim corner = has toolbar -> 0'),
+    # (plus build_topbar_fix/write_topbar_fix: the sidebar divider's drawing, 20 rows low otherwise)
 ]
-SET_NAMES = ['nometal', 'square', 'statusbar', 'gap', 'shadow', 'softlines', 'slimbar']
+SET_NAMES = ['nometal', 'square', 'statusbar', 'gap', 'shadow', 'softlines', 'slimbar', 'topbar']
 SETS = {n: {p[1]: p for p in PATCHES if p[0] == n} for n in SET_NAMES}
 
 # Framed-box painter's metal fill section (QuickDraw erase inside a CG bracket,
 # so it never showed): skipped and reused for the divider's erase entry point.
 FRAMEDBOX_SKIP = 0x19faec      # mr r3,r25 ; ... ; bl EraseRgn  (17 words)
 FRAMEDBOX_RESUME = 0x19fb30    # lis r29,0x32 (one-time grip image load)
+FRAMEDBOX_STUB = 16            # place_divider's 4-word stub; DividerOutset follows
 DIVIDER_CGRECT_CALL = 0x22500  # bl sub_14fb4 in the divider's draw routine
+DIVIDER_FRAME_CALL = 0x224e0   # bl sub_1ff18 (divider frame, port coordinates)
 # (10.3.9 addresses; located in other builds like the PATCHES sites)
-DIVIDER_ANCHORS = [FRAMEDBOX_SKIP, FRAMEDBOX_RESUME, DIVIDER_CGRECT_CALL]
+DIVIDER_ANCHORS = [FRAMEDBOX_SKIP, FRAMEDBOX_RESUME, DIVIDER_CGRECT_CALL, DIVIDER_FRAME_CALL]
+
+# 'topbar': QD rect -> CGRect converter (sub_14fb4) and its callers that pass
+# port rects (see cave.build_cgrect_port). The port entry lives in the bottom
+# status bar rect branch of sub_2adc8, dead once 'topbar' always takes the top.
+CGRECT_FN = 0x14fb4
+CGRECT_STWU = 0x14fc4          # stwu r1,-0x60(r1): last prologue word
+CGRECT_TOP = 0x14fec           # lha r0,0x48(r1): window content top
+CGRECT_PORT_CALLERS = [0x207e0,   # pane border lines, drawn by the divider
+                       0x4e710]   # splitter repaint while dragging the divider
+BOTTOMBAR_DEAD = (0x2ae14, 0x2ae70)   # after 'topbar's b at 0x2ae10, up to the top rect
+TOPBAR_ANCHORS = [CGRECT_STWU, CGRECT_TOP, BOTTOMBAR_DEAD[0]] + CGRECT_PORT_CALLERS
 
 REF_PATH = __file__.rsplit('/', 2)[0] + '/orig/Finder-10.3.9'
 
@@ -90,10 +166,14 @@ def text_words(m):
     return s, [struct.unpack_from('>I', m.data, s['offset'] + 4*i)[0] for i in range(s['size'] // 4)]
 
 
-def locate(ref, target):
+def locate(ref, target, names=None):
     """Map each 10.3.9 patch address to its address in `target` (identity for the
-    stock file; signature match for re-prebound copies)."""
-    anchors = [p[1] for p in PATCHES] + DIVIDER_ANCHORS
+    stock file; signature match for re-prebound copies). Only the sites of the
+    sets in `names` (default: all) are looked up, so an optional set's sites
+    needn't exist in builds that don't use it."""
+    anchors = [p[1] for p in PATCHES if names is None or p[0] in names] + DIVIDER_ANCHORS
+    if names is None or 'topbar' in names:
+        anchors += TOPBAR_ANCHORS
     if ref.data == target.data:
         return {a: a for a in anchors}
     rs, rw = text_words(ref)
@@ -103,8 +183,10 @@ def locate(ref, target):
     for a in anchors:
         i = (a - rs['addr']) // 4
         hits = []
-        # symmetric context first, then left-only context
-        for lo, hi in [(c, c) for c in range(8, 33, 4)] + [(c, 0) for c in range(8, 65, 4)]:
+        # symmetric context first, then left-only, then right-only, then a
+        # narrow symmetric one (10.3.4 differs within 8 words of some sites)
+        for lo, hi in ([(c, c) for c in range(8, 33, 4)] + [(c, 0) for c in range(8, 65, 4)] +
+                       [(0, c) for c in range(8, 65, 4)] + [(4, 4)]):
             sig = [mask(w) for w in rw[i-lo:i+hi+1]]
             hits = [j + lo for j in range(len(tm) - len(sig)) if tm[j:j+len(sig)] == sig]
             if len(hits) == 1:
@@ -126,51 +208,62 @@ def stub_addr(m, name):
 
 def place_cave(m, data, hook, quiet):
     """Write tools/cave.py's routine + constants into the free space at the
-    end of __TEXT. Returns {'addr': routine, 'gray': border-line gray float}."""
+    end of __TEXT.
+    Returns {'addr': routine, 'gray': the line gray (float)}."""
     import cave
     last = max(x['addr'] + x['size'] for x in m.sections if x['seg'] == '__TEXT')
     seg = [x for x in m.segments if x['name'] == '__TEXT'][0]
     caddr = (last + 15) & ~15
     stubs = {nm: stub_addr(m, nm) for nm in cave.STUBS_NEEDED}
-    code, gray = cave.build(caddr, hook, stubs)
+    code, grays = cave.build_topbar(caddr, hook, stubs)
     coff = m.addr2off(caddr)
     room = seg['vmaddr'] + seg['filesize'] - caddr
     if len(code) > room:
-        sys.exit('gradient routine (%d bytes) does not fit in __TEXT padding (%d)' % (len(code), room))
+        sys.exit('bar routine (%d bytes) does not fit in __TEXT padding (%d)' % (len(code), room))
     if any(data[coff:coff + len(code)]):
         sys.exit('__TEXT padding at %08x is not empty' % caddr)
     data[coff:coff + len(code)] = code
     if not quiet:
-        print('cave      %08x file+%06x  %d bytes (routine + table + gray), %d free' % (
+        print('cave      %08x file+%06x  %d bytes (routine + grays), %d free' % (
             caddr, coff, len(code), room - len(code)))
-    return {'addr': caddr, 'gray': gray}
+    return dict(grays, addr=caddr)
 
 
-def place_fill(m, data, statusbar_branch, hook, quiet):
-    """Write cave.build_fill_white() into EraseViewBackground's metal branch,
-    which the 'statusbar' set makes unreachable (it starts right after the
-    branch we make unconditional and ends at the Aqua branch)."""
+def bl_target(data, m, a):
+    w = w2(data, m, a)
+    assert w >> 26 == 18 and w & 1, 'expected bl at %08x' % a
+    disp = w & 0x03fffffc
+    if disp & 0x02000000: disp -= 0x04000000
+    return a + disp
+
+
+def place_divider_erase(m, data, sites, quiet):
+    """Write cave.build_divider_erase() into EraseViewBackground's metal
+    branch, which the 'statusbar' set makes unreachable (it starts right after
+    the branch we make unconditional and ends at the Aqua branch)."""
     import cave
-    start, end = statusbar_branch + 4, hook
-    lit = [x for x in m.sections if x['sect'] == '__literal4'][0]
-    ones = [lit['addr'] + k for k in range(0, lit['size'], 4)
-            if bytes(data[lit['offset'] + k:lit['offset'] + k + 4]) == struct.pack('>f', 1.0)]
-    assert ones, 'no 1.0f literal'
-    stubs = {nm: stub_addr(m, nm) for nm in cave.FILL_STUBS}
-    code = cave.build_fill_white(start, stubs, ones[0])
-    assert len(code) <= end - start, 'fill helper too big for the dead branch'
+    start, end = sites[0x23b0c] + 4, sites[0x23b90]
+    ext = sites[FRAMEDBOX_SKIP] + FRAMEDBOX_STUB    # after place_divider's stub
+    stubs = {nm: stub_addr(m, nm) for nm in cave.DIVIDER_STUBS}
+    code, back = cave.build_divider_erase(start, stubs, bl_target(data, m, sites[DIVIDER_FRAME_CALL]), ext)
+    assert len(code) <= end - start, 'divider erase too big for the dead branch'
     off = m.addr2off(start)
     data[off:off + len(code)] = code
+    tail = cave.build_divider_outset(ext, back, stubs)
+    assert ext + len(tail) <= sites[FRAMEDBOX_RESUME], 'divider outset too big for the framed-box section'
+    data[m.addr2off(ext):m.addr2off(ext) + len(tail)] = tail
     if not quiet:
-        print('fill      %08x file+%06x  %d bytes (CGFillRectWhite) in dead metal branch, %d free' % (
+        print('divider   %08x file+%06x  %d bytes (DividerErase) in dead metal branch, %d free' % (
             start, off, len(code), end - start - len(code)))
+        print('divider   %08x file+%06x  %d bytes (DividerOutset) in the skipped framed-box section, %d free' % (
+            ext, m.addr2off(ext), len(tail), sites[FRAMEDBOX_RESUME] - ext - len(tail)))
     return start
 
 
-
-
-def place_divider(m, data, fill, sites, quiet):
-    """Erase the sidebar divider before it draws its grip (window resizes)."""
+def place_divider(m, data, sites, quiet, cg_entry=None):
+    """Skip the framed-box painter's metal fill section (a QuickDraw erase
+    inside a CG bracket, never seen). cg_entry ('topbar'): the divider's QD ->
+    CG rect call goes to the converter's port-rect entry."""
     import cave
     ref = MachO(REF_PATH)
     def w(mm, a): return struct.unpack_from('>I', mm.data, mm.addr2off(a))[0]
@@ -178,49 +271,85 @@ def place_divider(m, data, fill, sites, quiet):
     assert resume - skip == FRAMEDBOX_RESUME - FRAMEDBOX_SKIP, 'framed-box section has a different length'
     for k in range(0, resume - skip, 4):           # code must match the stock 10.3.9 code
         assert mask(w(m, skip + k)) == mask(w(ref, FRAMEDBOX_SKIP + k)), 'framed-box code differs at %08x' % (skip + k)
-    hook = sites[DIVIDER_CGRECT_CALL]
-    hw = w(m, hook)
-    assert hw >> 26 == 18 and hw & 1, 'expected bl at %08x' % hook
-    disp = hw & 0x03fffffc
-    if disp & 0x02000000: disp -= 0x04000000
-    cg_rect_fn = hook + disp
-    body = fill + 0x10
-    assert w2(data, m, body) == 0x7c7f1b78, 'fill helper body must start with mr r31,r3'
     stub = cave.Asm(skip)
     stub.li(30, 1)                                 # r30 = 1 is relied on later
     stub.li(0, 0)
     stub.stw(0, 0xa0, 1)                           # no region -> nothing to dispose
     stub.b(resume)
     code = stub.assemble()
-    entry = skip + len(code)
-    code += cave.build_divider_entry(entry, cg_rect_fn, body)
-    assert skip + len(code) <= resume, 'divider entry does not fit'
+    assert len(code) == FRAMEDBOX_STUB
     off = m.addr2off(skip)
     data[off:off + len(code)] = code
-    struct.pack_into('>I', data, m.addr2off(hook), 0x48000001 | ((entry - hook) & 0x03fffffc))
     if not quiet:
-        print('divider   %08x file+%06x  framed-box metal section skipped; erase entry at %08x (%d bytes free)' % (
-            skip, off, entry, resume - skip - len(code)))
-        print('divider   %08x file+%06x  %08x -> bl %08x  divider draw: erase before drawing the grip' % (
-            hook, m.addr2off(hook), hw, entry))
+        print('divider   %08x file+%06x  framed-box metal section skipped' % (skip, off))
+    if cg_entry:
+        hook = sites[DIVIDER_CGRECT_CALL]
+        hw = w2(data, m, hook)
+        assert hw >> 26 == 18 and hw & 1, 'expected bl at %08x' % hook
+        struct.pack_into('>I', data, m.addr2off(hook), 0x48000001 | ((cg_entry - hook) & 0x03fffffc))
+        if not quiet:
+            print('topbar    %08x file+%06x  %08x -> bl %08x  divider draw: QD->CG rect -> port-rect entry' % (
+                hook, m.addr2off(hook), hw, cg_entry))
 
 
 def w2(data, m, a):
     return struct.unpack_from('>I', data, m.addr2off(a))[0]
 
 
+def build_topbar_fix(m, data, sites):
+    """cave.build_cgrect_port for this build: (code, entries, patches), where
+    patches are (addr, expected word, new word, comment). Written by
+    write_topbar_fix after the PATCHES loop ('slimbar' edits two words of
+    the dead branch it reuses)."""
+    import cave
+    start, end = sites[BOTTOMBAR_DEAD[0]], sites[BOTTOMBAR_DEAD[0]] + (BOTTOMBAR_DEAD[1] - BOTTOMBAR_DEAD[0])
+    fn = sites[CGRECT_STWU] - (CGRECT_STWU - CGRECT_FN)
+    assert w2(data, m, fn) == 0x7c0802a6 and w2(data, m, fn + 4) == 0xbf81fff0, 'unexpected converter prologue'
+    stubs = {nm: stub_addr(m, nm) for nm in cave.CGRECT_STUBS}
+    code, at = cave.build_cgrect_port(start, fn, stubs)
+    assert start + len(code) <= end, 'origin fix does not fit the dead branch'
+    def b(src, dst, link=0): return 0x48000000 | ((dst - src) & 0x03fffffc) | link
+    patches = [(sites[CGRECT_STWU], 0x9421ffa0, b(sites[CGRECT_STWU], at['normal']), 'QD->CG rect: prologue -> normal entry (r31 = 0)'),
+               (sites[CGRECT_TOP], 0xa8010048, b(sites[CGRECT_TOP], at['top']), 'QD->CG rect: content top -> + port origin for port rects')]
+    for c in CGRECT_PORT_CALLERS:
+        a = sites[c]
+        patches.append((a, None, b(a, at['port'], 1), 'QD->CG rect call -> port-rect entry'))
+    return code, at, patches
+
+
+def write_topbar_fix(m, data, fix, quiet):
+    code, at, patches = fix
+    off = m.addr2off(at['port'])
+    data[off:off + len(code)] = code
+    if not quiet:
+        print('topbar    %08x file+%06x  %d bytes: QD->CG rect entry for port rects, in the dead bottom-bar branch' % (
+            at['port'], off, len(code)))
+    for a, expect, new, why in patches:
+        cur = w2(data, m, a)
+        if expect is None:
+            assert cur >> 26 == 18 and cur & 1, 'expected a bl at %08x' % a
+        else:
+            assert cur == expect, '%08x: %08x != %08x (%s)' % (a, cur, expect, why)
+        struct.pack_into('>I', data, m.addr2off(a), new)
+        if not quiet:
+            print('topbar    %08x file+%06x  %08x -> %08x  %s' % (a, m.addr2off(a), cur, new, why))
+
+
 def apply(path_in, path_out, names=SET_NAMES, quiet=False):
     ref, m = MachO(REF_PATH), MachO(path_in)
-    sites = locate(ref, m)
+    sites = locate(ref, m, names)
     data = bytearray(m.data)
     cv = None
+    if 'topbar' in names:
+        assert 'shadow' in names and 'slimbar' in names, "'topbar' needs 'shadow' and 'slimbar'"
     if 'shadow' in names or 'softlines' in names:
         cv = place_cave(m, data, sites[0x23b90], quiet)
-    fill = None
+    fix = build_topbar_fix(m, data, sites) if 'topbar' in names else None
+    divider = None
     if 'gap' in names:
         assert 'statusbar' in names, "'gap' needs 'statusbar' (its helper lives in the dead metal branch)"
-        fill = place_fill(m, data, sites[0x23b0c], sites[0x23b90], quiet)
-        place_divider(m, data, fill, sites, quiet)
+        divider = place_divider_erase(m, data, sites, quiet)
+        place_divider(m, data, sites, quiet, cg_entry=fix[1]['port'] if fix else None)
     for p in PATCHES:
         name, refaddr, expect, action, why = p
         if name not in names:
@@ -232,12 +361,14 @@ def apply(path_in, path_out, names=SET_NAMES, quiet=False):
             sys.exit('mismatch at %08x: %08x != expected %08x (%s)' % (addr, cur, expect, why))
         if isinstance(action, int):
             new = action
+        elif action[0] == 'bl_new':     # a new call in place of any instruction
+            new = 0x48000001 | ((stub_addr(m, action[1]) - addr) & 0x03fffffc)
         elif action[0] == 'bl':
             assert cur >> 26 == 18 and cur & 1, 'expected a bl at %08x' % addr
             new = 0x48000001 | ((stub_addr(m, action[1]) - addr) & 0x03fffffc)
-        elif action[0] == 'bl_fill':
+        elif action[0] == 'bl_divider':
             assert cur >> 26 == 18 and cur & 1, 'expected a bl at %08x' % addr
-            new = 0x48000001 | ((fill - addr) & 0x03fffffc)
+            new = 0x48000001 | ((divider - addr) & 0x03fffffc)
         elif action[0] == 'cave':
             new = 0x48000000 | ((cv['addr'] - addr) & 0x03fffffc)
         elif action[0] == 'lfs_gray':
@@ -249,7 +380,7 @@ def apply(path_in, path_out, names=SET_NAMES, quiet=False):
                     base = (pw & 0xffff) << 16
                     break
             assert base is not None, 'no lis base before lfs at %08x' % addr
-            disp = cv['gray'] - base
+            disp = cv[action[1]] - base
             assert -0x8000 <= disp < 0x8000
             new = (cur & 0xffff0000) | (disp & 0xffff)
         elif action[0] == 'always':
@@ -260,6 +391,8 @@ def apply(path_in, path_out, names=SET_NAMES, quiet=False):
         struct.pack_into('>I', data, off, new)
         if not quiet:
             print('%-9s %08x file+%06x  %08x -> %08x  %s' % (name, addr, off, cur, new, why))
+    if fix:
+        write_topbar_fix(m, data, fix, quiet)
     open(path_out, 'wb').write(bytes(data))
     return sites
 
