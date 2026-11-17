@@ -272,6 +272,47 @@ DIVIDER_STUBS = ['_GetPort', '_GetPortBounds', '_OffsetRect', '_SetThemeBackgrou
                  '_EraseRect', '_GetWindowPort']
 
 
+def build_framedbox_fill(addr, stubs):
+    """FramedBoxFill, called instead of the framed-box painter's
+    `bl CGContextStrokeRect` (the search results' horizontal splitter, between
+    the results and the path pane). Its metal fill is skipped ('gap'), so
+    nothing erased the box: dragging the splitter left bits of the scroll bar
+    behind in it. Same arguments as CGContextStrokeRect (r3 = context,
+    r4..r7 = the CGRect, inset half a pixel for the 1px stroke):
+
+        CGContextSetRGBFillColor(ctx, 1, 1, 1, 1)
+        CGContextFillRect(ctx, rect)       the stroke covers the border after
+        CGContextStrokeRect(ctx, rect)     (tail call)
+    """
+    a = Asm(addr)
+    r0, r1, r3, r12 = 0, 1, 3, 12
+    a.mflr(r0)
+    a.stw(r0, 8, r1)
+    a.stwu(r1, -0x60, r1)
+    a.addi(r12, r1, 0x40)            # save ctx + rect (r3..r7) at 0x40..0x53
+    a.stswi(r3, r12, 20)
+    a.lis(r0, 0x3f80)                # 1.0f, for every color component
+    a.stw(r0, 0x58, r1)
+    a.lfs(1, 0x58, r1)
+    a.fmr(2, 1)
+    a.fmr(3, 1)
+    a.fmr(4, 1)
+    a.bl(stubs['_CGContextSetRGBFillColor'])     # r3 = ctx still
+    a.addi(r12, r1, 0x40)
+    a.lswi(r3, r12, 20)
+    a.bl(stubs['_CGContextFillRect'])
+    a.addi(r12, r1, 0x40)
+    a.lswi(r3, r12, 20)
+    a.addi(r1, r1, 0x60)
+    a.lwz(r0, 8, r1)
+    a.mtlr(r0)
+    a.b(stubs['_CGContextStrokeRect'])
+    return a.assemble()
+
+
+FRAMEDBOX_STUBS = ['_CGContextSetRGBFillColor', '_CGContextFillRect', '_CGContextStrokeRect']
+
+
 def build_cgrect_port(addr, cg_rect_fn, stubs):
     """A second entry into the QD rect -> CGRect converter (cg_rect_fn,
     sub_14fb4 in 10.3.9) for rects in port coordinates (patch.py 'topbar').

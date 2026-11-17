@@ -133,10 +133,19 @@ SETS = {n: {p[1]: p for p in PATCHES if p[0] == n} for n in SET_NAMES}
 FRAMEDBOX_SKIP = 0x19faec      # mr r3,r25 ; ... ; bl EraseRgn  (17 words)
 FRAMEDBOX_RESUME = 0x19fb30    # lis r29,0x32 (one-time grip image load)
 FRAMEDBOX_STUB = 16            # place_divider's 4-word stub; DividerOutset follows
+# The framed box is the search results' horizontal splitter (between the
+# results and the path pane). After its fill it loads the grip image and
+# draws it centered, unclipped (CGContextResetClip first): the 15 x 2048
+# divider image (tools/grip.py) made that a 15 px strip down the whole window.
+# The stub skips the grip, so the box is its frame alone, and the grip's
+# code holds FramedBoxFill (cave.build_framedbox_fill), which its stroke calls.
+FRAMEDBOX_STROKE = 0x19fae8    # bl CGContextStrokeRect (the box's frame)
+FRAMEDBOX_DRAWN = 0x19fc80     # right after bl CGContextDrawImage (the grip)
 DIVIDER_CGRECT_CALL = 0x22500  # bl sub_14fb4 in the divider's draw routine
 DIVIDER_FRAME_CALL = 0x224e0   # bl sub_1ff18 (divider frame, port coordinates)
 # (10.3.9 addresses; located in other builds like the PATCHES sites)
-DIVIDER_ANCHORS = [FRAMEDBOX_SKIP, FRAMEDBOX_RESUME, DIVIDER_CGRECT_CALL, DIVIDER_FRAME_CALL]
+DIVIDER_ANCHORS = [FRAMEDBOX_SKIP, FRAMEDBOX_RESUME, FRAMEDBOX_STROKE, FRAMEDBOX_DRAWN,
+                   DIVIDER_CGRECT_CALL, DIVIDER_FRAME_CALL]
 
 # 'topbar': QD rect -> CGRect converter (sub_14fb4) and its callers that pass
 # port rects (see cave.build_cgrect_port). The port entry lives in the bottom
@@ -271,17 +280,26 @@ def place_divider(m, data, sites, quiet, cg_entry=None):
     assert resume - skip == FRAMEDBOX_RESUME - FRAMEDBOX_SKIP, 'framed-box section has a different length'
     for k in range(0, resume - skip, 4):           # code must match the stock 10.3.9 code
         assert mask(w(m, skip + k)) == mask(w(ref, FRAMEDBOX_SKIP + k)), 'framed-box code differs at %08x' % (skip + k)
+    drawn, stroke = sites[FRAMEDBOX_DRAWN], sites[FRAMEDBOX_STROKE]
+    assert drawn - resume == FRAMEDBOX_DRAWN - FRAMEDBOX_RESUME, 'framed-box grip code has a different length'
+    assert w(m, drawn - 4) >> 26 == 18 and w(m, stroke) >> 26 == 18, 'expected bl CGContextDrawImage / StrokeRect'
     stub = cave.Asm(skip)
-    stub.li(30, 1)                                 # r30 = 1 is relied on later
+    stub.li(30, 1)                                 # as the skipped code left it
     stub.li(0, 0)
     stub.stw(0, 0xa0, 1)                           # no region -> nothing to dispose
-    stub.b(resume)
+    stub.b(drawn)                                  # no grip either
     code = stub.assemble()
     assert len(code) == FRAMEDBOX_STUB
     off = m.addr2off(skip)
     data[off:off + len(code)] = code
+    fill = cave.build_framedbox_fill(resume, {nm: stub_addr(m, nm) for nm in cave.FRAMEDBOX_STUBS})
+    assert resume + len(fill) <= drawn - 4, 'framed-box fill too big for the grip code'
+    data[m.addr2off(resume):m.addr2off(resume) + len(fill)] = fill
+    struct.pack_into('>I', data, m.addr2off(stroke), 0x48000001 | ((resume - stroke) & 0x03fffffc))
     if not quiet:
-        print('divider   %08x file+%06x  framed-box metal section skipped' % (skip, off))
+        print('divider   %08x file+%06x  framed-box metal section and grip skipped' % (skip, off))
+        print('divider   %08x file+%06x  %d bytes (FramedBoxFill) in the framed box\'s grip code; '
+              'bl CGContextStrokeRect at %08x -> bl FramedBoxFill' % (resume, m.addr2off(resume), len(fill), stroke))
     if cg_entry:
         hook = sites[DIVIDER_CGRECT_CALL]
         hw = w2(data, m, hook)
