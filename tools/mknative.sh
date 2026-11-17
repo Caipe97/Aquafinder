@@ -14,5 +14,7 @@ W=aquafinder-build   # in the remote home, so a restart (which clears /tmp) keep
   | $SSH "rm -rf $W/gui $W/pkg $W/tools && mkdir -p $W && cd $W && tar -xf - && mv tools/native-build.sh . && sh native-build.sh $V" \
   || { echo "mknative: if sudo was the problem, run this in Terminal on the Mac, then rerun with FETCH_ONLY=1:"
        echo "    cd ~/$W && sh native-build.sh $V"; exit 1; }
-$SSH "cat $W/build/Aquafinder.dmg" > dist/Aquafinder.dmg
+$SSH "cat $W/build/Aquafinder.dmg" > dist/Aquafinder.dmg.part && [ -s dist/Aquafinder.dmg.part ] \
+  || { rm -f dist/Aquafinder.dmg.part; echo "mknative: fetch failed; dist/Aquafinder.dmg unchanged"; exit 1; }
+mv -f dist/Aquafinder.dmg.part dist/Aquafinder.dmg
 echo "fetched $(md5 -q dist/Aquafinder.dmg) -> dist/Aquafinder.dmg"

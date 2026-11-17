@@ -14,20 +14,24 @@ Make Mac OS X 10.3.9 Panther look and fit better on small screens, like 800×600
 - A smaller loading spinner (13 px) that fits the thinner bar. It comes from the system theme,
   so it's installed with the title bars and every spinner in the system gets the same size.
 
-![Slim bottom bar](screens/8-slim-bar.png)
+![Bottom bar: stock (top) and Aquafinder (bottom)](screens/bottom-bar.png)
 ![Loading spinner in the bottom bar](screens/11-spinner.png)
 
 **Title bars**
 - Pinstriped title bars from Jaguar (10.2) in every app.
 - Inactive windows get see-through title bars, in both Carbon apps (like the Finder) and Cocoa apps (like TextEdit).
 
-![Jaguar title bars: active (top), inactive (bottom)](screens/5-titlebars-zoom.png)
-![See-through inactive Cocoa windows](screens/9-cocoa-translucent.png)
+![Jaguar title bars: active (top), inactive (bottom)](screens/titlebars.png)
+![See-through inactive Cocoa window (TextEdit)](screens/cocoa-inactive.png)
 
 **Logo**
 - Jaguar's Apple Garamond "Mac OS X" in About This Mac and on the login and Welcome panel,
   instead of Panther's Myriad.
 - Jaguar's Finder icon, in the Finder and in the Dock.
+
+![About This Mac](screens/about.png)
+![Login panel](screens/login.png)
+![Finder icon](screens/finder-icon.png)
 
 ## Install
 
@@ -41,7 +45,7 @@ This patches all three parts and puts the **Aquafinder** app in your Application
 Open the app any time to turn any part off or back on.
 Untick a part and click Apply to put Apple's original files back.
 
-![Aquafinder app](screens/12-app.png)
+![Aquafinder app](screens/app.png)
 
 ### From Terminal
 
@@ -83,14 +87,10 @@ Then restart. The original files are kept in `/Library/Aquafinder/`.
 
 | | |
 |---|---|
-| ![Stock Panther](screens/0-stock.png) | ![Patched](screens/2-patched-default.png) |
-| Stock Panther | Patched Finder |
-| ![List view](screens/3-patched-list.png) | ![Column view](screens/3-patched-column.png) |
+| ![List view](screens/finder-list.png) | ![Column view](screens/finder-column.png) |
 | List view | Column view |
-| ![Inactive title bars](screens/5-titlebars-inactive.png) | ![TextEdit](screens/5-titlebars-cocoa-textedit.png) |
-| Inactive title bar | Cocoa app (TextEdit) |
-| ![Bottom shadow](screens/7-bottom-shadow.png) | ![Quartz Extreme, Cocoa](screens/10-qe-cocoa-inactive.png) |
-| Bottom bar shadow | Quartz Extreme, inactive Cocoa window |
+| ![Stock: TextEdit over an inactive Finder](screens/stock-textedit.png) | ![Aquafinder: TextEdit over an inactive Finder](screens/titlebars-cocoa-finder.png) |
+| Stock: TextEdit in front of an inactive Finder | The same with Aquafinder |
 
 ## For developers
 
@@ -106,13 +106,13 @@ python3 tools/mkinstaller.py
 ```
 
 The app and the installer package are built on a real Panther Mac with the Developer Tools,
-since nothing current can compile PowerPC Cocoa code. Rebuild the script first, run `sudo -v`
-on the Mac, then:
+since nothing current can compile PowerPC Cocoa code. Rebuild the script first, then:
 
 ```sh
 tools/mknative.sh 1.0
 ```
 
 It copies `gui/`, `pkg/` and the script over SSH, builds there with `tools/native-build.sh`,
-and fetches `dist/Aquafinder.dmg`. Both the app and the package run `aquafinder.sh` to do the work,
+and fetches `dist/Aquafinder.dmg`. If sudo there needs a password, the build stops and prints the
+command to run in Terminal on the Mac; then fetch the result with `FETCH_ONLY=1 tools/mknative.sh 1.0`. Both the app and the package run `aquafinder.sh` to do the work,
 so they make the same checks.

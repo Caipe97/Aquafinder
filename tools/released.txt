@@ -14,3 +14,6 @@ about 0 0 0c90e48dd42c38d0b35a18172156c669
 loginart 0 0 9e7dfe86e536ee5dd186dbde1f769242
 about 0 0 5d3177aad538267e7ec98d9ac140036c
 loginart 0 0 b85a527071df3d0a34ca525bb5b647db
+about 0 0 42e471705ffab5a4d95a4de2bf4ee48a
+findericon 0 0 026dbb713ddceae8d2d7e0a801e01d5b
+dockfinder 0 0 646d8d4f3381afd63b081c63ee5aff62

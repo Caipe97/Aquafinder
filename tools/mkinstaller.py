@@ -104,13 +104,14 @@ src = os.path.join(ROOT, APPKIT_SRC); out = os.path.join(ROOT, 'build', 'AppKit-
 appkit_patch.apply(src, out, quiet=True)
 a, b = open(src, 'rb').read(), open(out, 'rb').read()
 skip, count, mo, mp = text_region(src, a, b)
-new_logo = logo.build(); seen = set()
+entries.append(('appkit', 'appkit1039', 'AppKit 10.3.9', skip, count, mo, mp, edit_lines(a, b)))
+
+new_logo = logo.build(); seen = set()   # reuses a/b/src below: keep AppKit's entry above
 for key, lbl, path, src in LOGO_FILES:
     if key in seen: continue          # two installed copies of one file share an entry
     seen.add(key)
     a, b = open(os.path.join(ROOT, 'orig', 'logo', src), 'rb').read(), new_logo[key]
     entries.append(('logo', key, lbl, 0, 0, md5(a), md5(b), edit_lines(a, b)))
-entries.append(('appkit', 'appkit1039', 'AppKit 10.3.9', skip, count, mo, mp, edit_lines(a, b)))
 
 # Every patched fingerprint ever released (tools/released.txt), so the script
 # can recognise files patched by an older Aquafinder and upgrade them.
