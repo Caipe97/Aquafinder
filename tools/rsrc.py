@@ -35,6 +35,42 @@ class ResFile:
             out[r['offset']:r['offset'] + len(new)] = new
         return bytes(out)
 
+    def with_added(self, rtype, rid, name, new):
+        """Return the file bytes with a new resource appended: its data goes
+        at the end of the data section, so every existing resource keeps its
+        offset and only the header and the map (rebuilt after it) change."""
+        assert (rtype, rid) not in self.res, '%s %d exists' % (rtype, rid)
+        doff = struct.unpack_from('>I', self.raw, 0)[0]
+        moff, dlen = struct.unpack_from('>I', self.raw, 4)[0], struct.unpack_from('>I', self.raw, 8)[0]
+        assert doff + dlen <= moff
+        data_end = doff + dlen
+        items = [(k, dict(r, roff=r['offset'] - 4 - doff)) for k, r in self.res.items()]
+        items.append(((rtype, rid), dict(name=name, attrs=0, roff=dlen)))
+        bytypes = OrderedDict()
+        for (t, i), r in items: bytypes.setdefault(t, []).append((i, r))
+        names = bytearray(); reflists = []
+        for t, its in bytypes.items():
+            refs = []
+            for i, r in its:
+                if r['name'] is not None:
+                    noff = len(names); nb = r['name'].encode('mac_roman')
+                    names += bytes([len(nb)]) + nb
+                else:
+                    noff = -1
+                refs.append(struct.pack('>hhII', i, noff, (r['attrs'] << 24) | r['roff'], 0))
+            reflists.append((t, refs))
+        tl = bytearray(struct.pack('>h', len(reflists) - 1))
+        refblob = bytearray(); ref_base = 2 + 8 * len(reflists)
+        for t, refs in reflists:
+            tl += struct.pack('>4sHH', t.encode('mac_roman'), len(refs) - 1, ref_base + len(refblob))
+            for r in refs: refblob += r
+        body = self.raw[:data_end] + struct.pack('>I', len(new)) + new
+        mapb = bytearray(28) + tl + refblob + names
+        struct.pack_into('>HHH', mapb, 22, self.attrs, 28, 28 + len(tl) + len(refblob))
+        hdr = struct.pack('>4I', doff, len(body), dlen + 4 + len(new), len(mapb))
+        struct.pack_into('>4I', mapb, 0, *struct.unpack('>4I', hdr))
+        return hdr + body[16:] + bytes(mapb)
+
     def types(self):
         out = OrderedDict()
         for (t, i) in self.res: out.setdefault(t, []).append(i)
