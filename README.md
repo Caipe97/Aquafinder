@@ -15,6 +15,8 @@ Make Mac OS X 10.3.9 Panther look and fit better on small screens, like 800×600
   gradient with its grip near the bottom, and no other lines around the panes. Collapse the
   sidebar and the divider stays at the window's left edge, so you can drag it back out.
 - The sidebar divider redraws cleanly when you drag it or resize the window.
+- In search results, the splitter above the path pane is Panther's Aqua splitter bar: a light
+  gray bar with a three-line grip in its middle, instead of the metal one.
 - A smaller loading spinner (13 px). It comes from the system theme, so it's installed with the
   title bars and every spinner in the system gets the same size.
 

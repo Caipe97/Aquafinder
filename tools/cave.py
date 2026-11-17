@@ -69,6 +69,7 @@ class Asm:
     def fadds(self, ft, fa, fb): self.emit((59 << 26) | (ft << 21) | (fa << 16) | (fb << 11) | (21 << 1))
     def fsubs(self, ft, fa, fb): self.emit((59 << 26) | (ft << 21) | (fa << 16) | (fb << 11) | (20 << 1))
     def fcmpu(self, fa, fb):   self.emit((63 << 26) | (7 << 23) | (fa << 16) | (fb << 11))      # cr7
+    def fmuls(self, ft, fa, fc): self.emit((59 << 26) | (ft << 21) | (fa << 16) | (fc << 6) | (25 << 1))
     def fmr(self, ft, fb):     self.emit((63 << 26) | (ft << 21) | (fb << 11) | (72 << 1))
     def lswi(self, rt, ra, nb): self.emit((31 << 26) | (rt << 21) | (ra << 16) | ((nb & 31) << 11) | (597 << 1))
     def stswi(self, rs, ra, nb): self.emit((31 << 26) | (rs << 21) | (ra << 16) | ((nb & 31) << 11) | (725 << 1))
@@ -270,6 +271,63 @@ def build_divider_outset(addr, back, stubs):
 
 DIVIDER_STUBS = ['_GetPort', '_GetPortBounds', '_OffsetRect', '_SetThemeBackground',
                  '_EraseRect', '_GetWindowPort']
+
+
+def build_splitter_draw(addr, image, cgrect_fn, done, stubs):
+    """The search results' horizontal splitter (the framed-box painter, between
+    the results and the path pane), drawn as Panther's Aqua splitter bar: the
+    image 'PNG ' 8801 (tools/grip.py, SPLITTER_WIDTH x 9, the grip in its center
+    columns), which the painter's own loader has just made (r30 = &image, as
+    after its one-time load). In the painter's frame (ctx at 0x74) and in
+    place of its centered draw of the grip:
+
+        cgrect_fn(&box, view, qdRect)         the box, CG (0xd0; r31, r25 as there)
+        CGContextClipToRect(ctx, box)
+        CGContextSetInterpolationQuality(ctx, none)   1:1 pixels
+        CGContextDrawImage(ctx, {box.x + round(box.w/2) - W/2, box.y, W, box.h}, image)
+        b done
+
+    The image covers the box, its frame included (the bar's own lines)."""
+    a = Asm(addr)
+    r0, r1, r3, r4, r5, r8, r12, r25, r30, r31 = 0, 1, 3, 4, 5, 8, 12, 25, 30, 31
+    def fconst(fr, bits):                          # fr = float with these bits (scratch at 0xe0)
+        a.lis(r0, bits >> 16)
+        a.stw(r0, 0xe0, r1)
+        a.lfs(fr, 0xe0, r1)
+    a.addi(r3, r1, 0xd0)
+    a.mr(r4, r31)
+    a.mr(r5, r25)
+    a.bl(cgrect_fn)
+    a.lwz(r3, 0x74, r1)
+    a.addi(r12, r1, 0xd0)
+    a.lswi(r4, r12, 16)
+    a.bl(stubs['_CGContextClipToRect'])
+    a.lwz(r3, 0x74, r1)
+    a.li(r4, 1)                                    # kCGInterpolationNone
+    a.bl(stubs['_CGContextSetInterpolationQuality'])
+    a.lfs(1, 0xd8, r1)                             # x = box.x + round(box.w * 0.5) - W/2
+    fconst(0, 0x3f000000)                          # 0.5
+    a.fmuls(1, 1, 0)
+    fconst(0, 0x4b000000)                          # 2^23: adding it rounds to a whole number
+    a.fadds(1, 1, 0)                               # (box.x is one already: a whole pixel,
+    a.fsubs(1, 1, 0)                               #  not blended over two)
+    a.lfs(3, 0xd0, r1)
+    a.fadds(3, 3, 1)
+    fconst(0, struct.unpack('>I', struct.pack('>f', image / 2))[0])
+    a.fsubs(3, 3, 0)
+    a.stfs(3, 0xd0, r1)
+    a.lis(r0, struct.unpack('>I', struct.pack('>f', image))[0] >> 16)
+    a.stw(r0, 0xd8, r1)                            # width W (y, height: the box's)
+    a.lwz(r3, 0x74, r1)
+    a.addi(r12, r1, 0xd0)
+    a.lswi(r4, r12, 16)
+    a.lwz(r8, 0, r30)
+    a.bl(stubs['_CGContextDrawImage'])
+    a.b(done)
+    return a.assemble()
+
+
+SPLITTER_STUBS = ['_CGContextClipToRect', '_CGContextSetInterpolationQuality', '_CGContextDrawImage']
 
 
 def build_cgrect_port(addr, cg_rect_fn, stubs):

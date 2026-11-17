@@ -50,16 +50,26 @@ def runs(a, b, gap=16):
     return [(s, b[s:e+1]) for s, e in out]
 
 
-def edit_lines(a, b):
-    if len(a) != len(b):   # a different-sized file: truncate the copy and write all of it
-        # every byte differs from (c ^ 1), so the writes cover the whole file
-        return '    : > "$TMP"\n' + edit_lines(bytes(c ^ 1 for c in b), b)
+def put_lines(runs_):
     lines = []
-    for off, chunk in runs(a, b):
+    for off, chunk in runs_:
         for k in range(0, len(chunk), 1024):   # keep each printf argument modest
             part = chunk[k:k+1024]
             lines.append("    put %d %d '%s'" % (off + k, len(part), ''.join('\\%03o' % c for c in part)))
-    return '\n'.join(lines)
+    return lines
+
+
+def edit_lines(a, b):
+    if len(b) > len(a):
+        # a grown file that keeps its bytes' places (a resource appended to
+        # Finder.rsrc): edit the common part, then write the rest past its
+        # end (put's dd extends the copy)
+        head = runs(a, b[:len(a)]) if a != b[:len(a)] else []
+        if sum(len(c) for _, c in head) < len(a) // 4:
+            return '\n'.join(put_lines(head + [(len(a), b[len(a):])]))
+    if len(a) != len(b):   # a different-sized file: truncate the copy and write all of it
+        return '    : > "$TMP"\n' + '\n'.join(put_lines([(0, b)]))
+    return '\n'.join(put_lines(runs(a, b)))
 
 
 from macho import MachO
