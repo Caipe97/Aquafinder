@@ -1,9 +1,10 @@
 """Aquafinder Finder patcher: Aqua (non-metal) browser windows that keep
 the toolbar and sidebar.
 
-Patch sites are defined against the stock 10.3.9 (7W98) Finder. Re-prebound
-copies (every Combo-updated iBook) are matched by masked instruction
-signatures, which update_prebinding never changes.
+Patch sites are defined against the stock 10.3.9 (7W98) Finder. Other
+copies -- re-prebound ones, and other builds such as 10.3.4 whose code has
+moved -- are matched by masked instruction signatures, which
+update_prebinding never changes; every site must match exactly once.
 
 usage: patch.py <in-finder> <out-finder> [set,set,...]   (default: all sets)
 """
@@ -64,6 +65,14 @@ PATCHES = [
 SET_NAMES = ['nometal', 'square', 'statusbar', 'gap', 'shadow', 'softlines', 'slimbar']
 SETS = {n: {p[1]: p for p in PATCHES if p[0] == n} for n in SET_NAMES}
 
+# Framed-box painter's metal fill section (QuickDraw erase inside a CG bracket,
+# so it never showed): skipped and reused for the divider's erase entry point.
+FRAMEDBOX_SKIP = 0x19faec      # mr r3,r25 ; ... ; bl EraseRgn  (17 words)
+FRAMEDBOX_RESUME = 0x19fb30    # lis r29,0x32 (one-time grip image load)
+DIVIDER_CGRECT_CALL = 0x22500  # bl sub_14fb4 in the divider's draw routine
+# (10.3.9 addresses; located in other builds like the PATCHES sites)
+DIVIDER_ANCHORS = [FRAMEDBOX_SKIP, FRAMEDBOX_RESUME, DIVIDER_CGRECT_CALL]
+
 REF_PATH = __file__.rsplit('/', 2)[0] + '/orig/Finder-10.3.9'
 
 
@@ -84,14 +93,15 @@ def text_words(m):
 def locate(ref, target):
     """Map each 10.3.9 patch address to its address in `target` (identity for the
     stock file; signature match for re-prebound copies)."""
+    anchors = [p[1] for p in PATCHES] + DIVIDER_ANCHORS
     if ref.data == target.data:
-        return {p[1]: p[1] for p in PATCHES}
+        return {a: a for a in anchors}
     rs, rw = text_words(ref)
     ts, tw = text_words(target)
     tm = [mask(w) for w in tw]
     found = {}
-    for p in PATCHES:
-        i = (p[1] - rs['addr']) // 4
+    for a in anchors:
+        i = (a - rs['addr']) // 4
         hits = []
         # symmetric context first, then left-only context
         for lo, hi in [(c, c) for c in range(8, 33, 4)] + [(c, 0) for c in range(8, 65, 4)]:
@@ -100,8 +110,8 @@ def locate(ref, target):
             if len(hits) == 1:
                 break
         if len(hits) != 1:
-            sys.exit('cannot uniquely locate patch site %08x (%s): %d candidates' % (p[1], p[4], len(hits)))
-        found[p[1]] = ts['addr'] + 4*hits[0]
+            sys.exit('cannot uniquely locate patch site %08x: %d candidates' % (a, len(hits)))
+        found[a] = ts['addr'] + 4*hits[0]
     return found
 
 
@@ -157,11 +167,6 @@ def place_fill(m, data, statusbar_branch, hook, quiet):
     return start
 
 
-# Framed-box painter's metal fill section (QuickDraw erase inside a CG bracket,
-# so it never showed): skipped and reused for the divider's erase entry point.
-FRAMEDBOX_SKIP = 0x19faec      # mr r3,r25 ; ... ; bl EraseRgn  (17 words)
-FRAMEDBOX_RESUME = 0x19fb30    # lis r29,0x32 (one-time grip image load)
-DIVIDER_CGRECT_CALL = 0x22500  # bl sub_14fb4 in the divider's draw routine
 
 
 def place_divider(m, data, fill, sites, quiet):
@@ -169,10 +174,11 @@ def place_divider(m, data, fill, sites, quiet):
     import cave
     ref = MachO(REF_PATH)
     def w(mm, a): return struct.unpack_from('>I', mm.data, mm.addr2off(a))[0]
-    skip, resume = FRAMEDBOX_SKIP, FRAMEDBOX_RESUME
-    for a in range(skip, resume, 4):               # code must be the stock 10.3.9 code
-        assert w(m, a) == w(ref, a), 'framed-box code differs at %08x' % a
-    hook = DIVIDER_CGRECT_CALL
+    skip, resume = sites[FRAMEDBOX_SKIP], sites[FRAMEDBOX_RESUME]
+    assert resume - skip == FRAMEDBOX_RESUME - FRAMEDBOX_SKIP, 'framed-box section has a different length'
+    for k in range(0, resume - skip, 4):           # code must match the stock 10.3.9 code
+        assert mask(w(m, skip + k)) == mask(w(ref, FRAMEDBOX_SKIP + k)), 'framed-box code differs at %08x' % (skip + k)
+    hook = sites[DIVIDER_CGRECT_CALL]
     hw = w(m, hook)
     assert hw >> 26 == 18 and hw & 1, 'expected bl at %08x' % hook
     disp = hw & 0x03fffffc

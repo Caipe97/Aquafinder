@@ -4,10 +4,12 @@ installs/restores two independent components on an iBook:
   finder     Aqua (non-brushed-metal) Finder windows with toolbar + sidebar
   titlebars  Jaguar's pinstriped, translucent title bars (theme Extras.rsrc,
              plus AppKit so Cocoa windows can show the translucency)
+  logo       Jaguar branding: the Garamond "Mac OS X" wordmark in About This
+             Mac and the login panel, and Jaguar's Finder icon (Finder + Dock)
 """
 import sys, hashlib, os
 sys.path.insert(0, os.path.dirname(__file__))
-import patch, theme, appkit_patch
+import patch, theme, appkit_patch, logo
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 FINDER_PATH = '/System/Library/CoreServices/Finder.app/Contents/MacOS/Finder'
@@ -18,6 +20,15 @@ FINDER_BUILDS = [('10.3.9', 'orig/Finder-10.3.9')]
 APPKIT_SRC = 'orig/appkit/AppKit-10.3.9'             # stock, from the 10.3.9 Combo
 THEME_SRC = 'theme/panther-10.3.9/Extras.rsrc'      # unchanged since 10.3.0 (the Combo doesn't ship it)
 JAGUAR_SRC = 'theme/jaguar/Extras.rsrc'              # from Mac OS X 10.2.8
+CS = '/System/Library/CoreServices/'
+LOGO_FILES = [   # (key, label, installed path, Panther original in orig/logo)
+    ('about', 'About This Mac logo', CS + 'loginwindow.app/Contents/Resources/MacOSX.tif', 'panther-MacOSX.tif'),
+    ('loginart', 'login panel logo', CS + 'SecurityAgent.app/Contents/Resources/MacOSXart.tif', 'panther-MacOSXart.tif'),
+    ('loginart', 'login panel logo', CS + 'SecurityAgentPlugins/loginwindow.bundle/Contents/Resources/MacOSXart.tif', 'panther-MacOSXart.tif'),
+    ('findericon', 'Finder icon', CS + 'Finder.app/Contents/Resources/Finder.icns', 'panther-Finder.icns'),
+    ('findericon', 'Finder icon', CS + 'SystemIcons.bundle/Contents/Resources/FinderIcon.icns', 'panther-Finder.icns'),
+    ('dockfinder', 'Dock Finder icon', CS + 'Dock.app/Contents/Resources/finder.png', 'panther-dock-finder.png'),
+]
 THEME_IDS = [2004, 2005, 2267, 4330]                 # title bar caps/stretch, modal caps, toolbar bg
 
 
@@ -37,6 +48,9 @@ def runs(a, b, gap=16):
 
 
 def edit_lines(a, b):
+    if len(a) != len(b):   # a different-sized file: truncate the copy and write all of it
+        # every byte differs from (c ^ 1), so the writes cover the whole file
+        return '    : > "$TMP"\n' + edit_lines(bytes(c ^ 1 for c in b), b)
     lines = []
     for off, chunk in runs(a, b):
         for k in range(0, len(chunk), 1024):   # keep each printf argument modest
@@ -48,16 +62,20 @@ def edit_lines(a, b):
 from macho import MachO
 
 def text_region(path, a, b):
-    """4 KiB-aligned block span covering __TEXT after the Mach-O header.
+    """4 KiB-aligned block span covering __TEXT from its first section on.
     update_prebinding rewrites the header/load commands and __DATA pointers
-    but never the code segment, so this identifies a Finder build however
-    often it has been re-prebound -- and it covers the gradient routine that
-    lives in __TEXT's tail padding."""
-    import struct as _s
+    but never the code, so this identifies a Finder build however often it
+    has been re-prebound -- and it covers the gradient routine that lives in
+    __TEXT's tail padding. It starts at the first whole block after the
+    first section's start, not after the load commands: re-prebinding
+    against newer dylibs (QuickTime 7.5 pulls in Accelerate, AudioToolbox...)
+    appends LC_PREBOUND_DYLIB commands that grow into the zero padding before
+    the code, and the block holding the code's start can share bytes with
+    the header."""
     m = MachO(path)
-    sizeofcmds = _s.unpack_from('>I', m.data, 20)[0]
     seg = [x for x in m.segments if x['name'] == '__TEXT'][0]
-    skip = -(-(28 + sizeofcmds) // 4096)
+    first = min(s['offset'] for s in m.sections if s['seg'] == '__TEXT' and s['offset'])
+    skip = -(-first // 4096)
     count = (seg['fileoff'] + seg['filesize']) // 4096 - skip
     lo, hi = skip * 4096, (skip + count) * 4096
     for off, chunk in runs(a, b):
@@ -86,6 +104,12 @@ src = os.path.join(ROOT, APPKIT_SRC); out = os.path.join(ROOT, 'build', 'AppKit-
 appkit_patch.apply(src, out, quiet=True)
 a, b = open(src, 'rb').read(), open(out, 'rb').read()
 skip, count, mo, mp = text_region(src, a, b)
+new_logo = logo.build(); seen = set()
+for key, lbl, path, src in LOGO_FILES:
+    if key in seen: continue          # two installed copies of one file share an entry
+    seen.add(key)
+    a, b = open(os.path.join(ROOT, 'orig', 'logo', src), 'rb').read(), new_logo[key]
+    entries.append(('logo', key, lbl, 0, 0, md5(a), md5(b), edit_lines(a, b)))
 entries.append(('appkit', 'appkit1039', 'AppKit 10.3.9', skip, count, mo, mp, edit_lines(a, b)))
 
 # Every patched fingerprint ever released (tools/released.txt), so the script
@@ -123,6 +147,9 @@ def ident_block(comp):
         out.append('  esac')
     return '\n'.join(out)
 known_finder, known_theme, known_appkit = ident_block('finder'), ident_block('titlebars'), ident_block('appkit')
+known_logo = ident_block('logo')
+logo_paths = ' '.join(p for k, l, p, s in LOGO_FILES)
+assert ' ' not in ''.join(p for k, l, p, s in LOGO_FILES), 'LOGO_FILES is word-split in sh'
 edits = '\n'.join("  %s)\n%s\n    ;;" % (key, e) for c, key, lbl, sk, cn, o, n, e in entries)
 
 script = r'''#!/bin/sh
@@ -134,8 +161,11 @@ script = r'''#!/bin/sh
 #              (the HIToolbox theme, plus AppKit so Cocoa windows blend too)
 #
 #   sh aquafinder.sh status
-#   sudo sh aquafinder.sh install [finder|titlebars]     (default: both)
-#   sudo sh aquafinder.sh restore [finder|titlebars]     (default: both)
+#   logo       Jaguar branding: Garamond "Mac OS X" in About This Mac and the
+#              login panel, and Jaguar's Finder icon in the Finder and Dock
+#
+#   sudo sh aquafinder.sh install [finder|titlebars|logo]   (default: all)
+#   sudo sh aquafinder.sh restore [finder|titlebars|logo]   (default: all)
 #
 # Only recognised files are touched (the Finder is identified by its code
 # section, so re-prebinding by Software Update doesn't matter). Each is backed up, patched
@@ -171,6 +201,7 @@ identify() {   # identify <file> <component>: sets KEY LABEL STATE SKIP COUNT WA
     finder)    identify_finder "$1" ;;
     titlebars) identify_theme "$1" ;;
     appkit)    identify_appkit "$1" ;;
+    logo)      identify_logo "$1" ;;
   esac
 }
 identify_finder() {
@@ -182,6 +213,10 @@ __KNOWN_THEME__
 identify_appkit() {
 __KNOWN_APPKIT__
 }
+identify_logo() {
+__KNOWN_LOGO__
+}
+LOGO_FILES="${LOGO_FILES:-__LOGO_PATHS__}"   # each is a separate file; status/install/restore go through all
 
 apply_edits() {
   case "$1" in
@@ -266,31 +301,42 @@ finish() {
     *appkit*)    echo "Restart the Mac: AppKit stays loaded until a restart, so Cocoa apps change only after it." ;;
     *titlebars*) echo "Log out and back in (or restart) so every app picks up the title bars." ;;
   esac
+  case "$CHANGED" in *logo*)
+    # the Dock keeps its own per-user icon cache across logins; it rebuilds it on launch
+    rm -f /Library/Caches/com.apple.dock.iconcache.* /Users/*/Library/Caches/com.apple.dock.iconcache.* 2>/dev/null
+    for P in $(ps -axc | awk '$NF == "Dock" {print $1}'); do kill "$P" 2>/dev/null; done
+    touch /System/Library/CoreServices/Finder.app   # refresh the Finder's cached icon
+    echo "Dock restarted. The login panel shows the new logo after you log out." ;;
+  esac
 }
 
 WHAT="${2:-all}"
-case "$WHAT" in finder|titlebars|all) ;; *) echo "unknown component: $WHAT"; exit 1 ;; esac
+case "$WHAT" in finder|titlebars|logo|all) ;; *) echo "unknown component: $WHAT"; exit 1 ;; esac
+want() { [ "$WHAT" = all ] || [ "$WHAT" = "$1" ]; }
 CHANGED=; RC=0
 case "$1" in
   install)
     need_root install
-    [ "$WHAT" != titlebars ] && { install_one "$FINDER" finder || RC=1; }
-    [ "$WHAT" != finder ]    && { install_one "$THEME" titlebars || RC=1; install_one "$APPKIT" appkit || RC=1; }
+    want finder    && { install_one "$FINDER" finder || RC=1; }
+    want titlebars && { install_one "$THEME" titlebars || RC=1; install_one "$APPKIT" appkit || RC=1; }
+    want logo      && for F in $LOGO_FILES; do install_one "$F" logo || RC=1; done
     finish ;;
   restore|uninstall)
     need_root restore
-    [ "$WHAT" != titlebars ] && { restore_one "$FINDER" finder || RC=1; }
-    [ "$WHAT" != finder ]    && { restore_one "$THEME" titlebars || RC=1; restore_one "$APPKIT" appkit || RC=1; }
+    want finder    && { restore_one "$FINDER" finder || RC=1; }
+    want titlebars && { restore_one "$THEME" titlebars || RC=1; restore_one "$APPKIT" appkit || RC=1; }
+    want logo      && for F in $LOGO_FILES; do restore_one "$F" logo || RC=1; done
     finish ;;
   status|"")
     status_one "$FINDER" finder
     status_one "$THEME" titlebars
-    status_one "$APPKIT" appkit ;;
-  *) echo "usage: sudo sh $0 [status|install|restore] [finder|titlebars]"; exit 1 ;;
+    status_one "$APPKIT" appkit
+    for F in $LOGO_FILES; do status_one "$F" logo; done ;;
+  *) echo "usage: sudo sh $0 [status|install|restore] [finder|titlebars|logo]"; exit 1 ;;
 esac
 exit $RC
 '''
-script = (script.replace('__KNOWN_FINDER__', known_finder).replace('__KNOWN_THEME__', known_theme).replace('__KNOWN_APPKIT__', known_appkit).replace('__EDITS__', edits)
+script = (script.replace('__KNOWN_FINDER__', known_finder).replace('__KNOWN_THEME__', known_theme).replace('__KNOWN_APPKIT__', known_appkit).replace('__KNOWN_LOGO__', known_logo).replace('__LOGO_PATHS__', logo_paths).replace('__EDITS__', edits)
           .replace('__FINDER__', FINDER_PATH).replace('__THEME__', THEME_PATH).replace('__APPKIT__', APPKIT_PATH))
 os.makedirs(os.path.join(ROOT, 'dist'), exist_ok=True)
 path = os.path.join(ROOT, 'dist', 'aquafinder.sh')

@@ -24,7 +24,26 @@ Make Mac OS X 10.3.9 Panther look and fit better on small screens, like 800×600
 ![Jaguar title bars: active (top), inactive (bottom)](screens/5-titlebars-zoom.png)
 ![See-through inactive Cocoa windows](screens/9-cocoa-translucent.png)
 
+**Logo**
+- Jaguar's Apple Garamond "Mac OS X" in About This Mac and on the login and Welcome panel,
+  instead of Panther's Myriad.
+- Jaguar's Finder icon, in the Finder and in the Dock.
+
 ## Install
+
+The easy way:
+
+1. Copy [`dist/Aquafinder.dmg`](dist/Aquafinder.dmg) to the Mac and open it.
+2. Double-click **Aquafinder.pkg** and follow the installer.
+3. Restart when it asks.
+
+This patches all three parts and puts the **Aquafinder** app in your Applications folder.
+Open the app any time to turn any part off or back on.
+Untick a part and click Apply to put Apple's original files back.
+
+![Aquafinder app](screens/12-app.png)
+
+### From Terminal
 
 1. Copy [`dist/aquafinder.sh`](dist/aquafinder.sh) to the Mac (a USB stick works).
 2. Open Terminal and run:
@@ -38,10 +57,12 @@ Make Mac OS X 10.3.9 Panther look and fit better on small screens, like 800×600
 To **update** to a newer version, run the same `install` command with the new script and restart.
 It upgrades files patched by an older version, starting from the saved originals.
 
-You can also install just one part: `install finder` or `install titlebars`.
+You can also install just one part: `install finder`, `install titlebars` or `install logo`.
 Check what's installed with `sh aquafinder.sh status`.
 
 ## Undo
+
+Untick every part in the Aquafinder app and click Apply, or run:
 
 ```sh
 sudo sh aquafinder.sh restore
@@ -77,8 +98,21 @@ The `tools/` folder has everything used to build the script: a small PowerPC dis
 the patch definitions (`patch.py`, `appkit_patch.py`, `theme.py`) and helpers for testing in QEMU.
 
 To rebuild `dist/aquafinder.sh`, put your own copies of the Apple files in `orig/` and `theme/`
-(they aren't in this repo), then run:
+(they aren't in this repo). The logo part also reads `orig/logo/` (files from 10.3.9 and 10.2.8,
+listed in `tools/logo.py`) and needs Pillow. Then run:
 
 ```sh
 python3 tools/mkinstaller.py
 ```
+
+The app and the installer package are built on a real Panther Mac with the Developer Tools,
+since nothing current can compile PowerPC Cocoa code. Rebuild the script first, run `sudo -v`
+on the Mac, then:
+
+```sh
+tools/mknative.sh 1.0
+```
+
+It copies `gui/`, `pkg/` and the script over SSH, builds there with `tools/native-build.sh`,
+and fetches `dist/Aquafinder.dmg`. Both the app and the package run `aquafinder.sh` to do the work,
+so they make the same checks.

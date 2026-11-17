@@ -1,0 +1,10 @@
+#!/bin/sh
+# Runs as root after Aquafinder.app is copied. $1 = this package.
+# Applies every part with the same script the app uses; output goes to the log.
+LOG=/Library/Logs/Aquafinder.log
+{ echo "== $(date): installer package"
+  sh "$1/Contents/Resources/aquafinder.sh" install
+  echo "exit $?"; } >> "$LOG" 2>&1
+# Unrecognised files are skipped on purpose, so this never fails the install;
+# the app shows what is installed.
+exit 0
