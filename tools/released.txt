@@ -17,3 +17,4 @@ loginart 0 0 b85a527071df3d0a34ca525bb5b647db
 about 0 0 42e471705ffab5a4d95a4de2bf4ee48a
 findericon 0 0 026dbb713ddceae8d2d7e0a801e01d5b
 dockfinder 0 0 646d8d4f3381afd63b081c63ee5aff62
+finder1039 9 662 188e07390cc6c3c814210359ecdd1359

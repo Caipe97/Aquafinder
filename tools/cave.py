@@ -15,8 +15,8 @@ lighter pane border lines lives right after it, see patch.py 'softlines'):
         do the original two calls
     else:                               (toolbar shown, status bar at the bottom)
         paint the rect row by row with a gray picked by the row's distance
-        from the bottom of the port, Jaguar's 15-row curve resampled to 19 rows
-        (the bar's 18 rows take rows 1..18; row 0's gray is the pane border color)
+        from the bottom of the port: Jaguar's 15-row curve, one gray per bar
+        row (row 0, 212, doubles as the panes' bottom border, which overlaps it)
 
 Stack use stays inside the host function's own frame (0x38..0x57 are free on
 this path; the callee-saved r28 is spilled there and restored).
@@ -33,9 +33,10 @@ BAR_HEIGHT = 15
 
 
 def gradient_for(bar_height=BAR_HEIGHT, strip=JAGUAR_STRIP):
-    """Top->bottom grays for the panes' 1px border row (row 0, 212) plus the
-    bar's rows: Jaguar's strip resampled to bar_height + 1 rows."""
-    n = bar_height + 1
+    """Top->bottom grays for the bar's rows: Jaguar's strip resampled to
+    bar_height rows. Row 0 (212) is also the panes' 1px bottom border, which
+    overlaps it (patch.py 'slimbar')."""
+    n = bar_height
     out = []
     for i in range(n):
         x = i * (len(strip) - 1) / (n - 1)
@@ -158,8 +159,8 @@ def build(cave, hook, stubs, gradient=GRADIENT_TOP_TO_BOTTOM, line_gray=None):
     a.bl(stubs['_GetPortBounds'])
     a.lha(r0, 0x54, r1)              # port bottom -> 0x46 (16-bit spare slot)
     a.sth(r0, 0x46, r1)
-    a.lha(r28, 0, r30)               # y = rect.top - 1: also paint the row the panes'
-    a.addi(r28, r28, -1)             # bottom borders sit on, so it's 212 under the divider too
+    a.lha(r28, 0, r30)               # y = rect.top: the panes' bottom border row (212),
+                                     # also under the divider
 
     a.label('loop')
     a.lha(r0, 4, r30)                # while y < rect.bottom

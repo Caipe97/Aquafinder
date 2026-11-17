@@ -51,9 +51,12 @@ PATCHES = [
     ('softlines', 0x19fac0, 0xc022fef4, ('lfs_gray',), 'framed box stroke gray 0.6 -> 212/255'),
     # Bottom bar 15 rows instead of 18, the height of the resize handle (no
     # white rows above it; the file list gains 3 rows). The window layout
-    # subtracts this from the content height when the bar is at the bottom.
+    # subtracts this from the content height when the bar is at the bottom:
+    # 14, so the panes overlap the bar's top row and their 1px bottom border
+    # is that row (212, as in Jaguar). The list's scroll bar then ends right
+    # above the resize handle, with no extra line between them.
     # Keep in sync with cave.BAR_HEIGHT (the gradient table's length).
-    ('slimbar', 0x48958, 0x38000012, 0x3800000f, 'window layout: bottom bar height 18 -> 15'),
+    ('slimbar', 0x48958, 0x38000012, 0x3800000e, 'window layout: bottom bar height 18 -> 15, panes overlap its top row'),
     ('slimbar', 0x2ae30, 0x3842ffee, 0x3842fff1, 'status bar rect: top = bottom - 18 -> - 15'),
     ('slimbar', 0x2ae48, 0x38420012, 0x3842000f, 'status bar rect: bottom = top + 18 -> + 15'),
     # loading spinner (16x16 theme art, drawn bottom-aligned in its rect): the
@@ -61,6 +64,12 @@ PATCHES = [
     # canvas on the border line + bar; the theme's arrows are shrunk to 13 px
     # (theme.shrink_frames) so they sit on bar rows 1..13.
     ('slimbar', 0x1605c, 0x39290010, 0x3929000e, 'status bar spinner: bottom = top + 16 -> + 14'),
+    # With the bar at the bottom, the panes' content view is one column wider
+    # than the window, so the panes' right border line falls outside it and
+    # the list's scroll bar ends on the window edge, in line with the resize
+    # handle below it (as in Aqua windows). r28 = 1 when the bar is at the
+    # bottom, 0 otherwise; the width is never negative, so no sign extension.
+    ('slimbar', 0x48974, 0x7c840734, 0x7c84e214, 'window layout: content width -> width + (bar at bottom)'),
 ]
 SET_NAMES = ['nometal', 'square', 'statusbar', 'gap', 'shadow', 'softlines', 'slimbar']
 SETS = {n: {p[1]: p for p in PATCHES if p[0] == n} for n in SET_NAMES}
