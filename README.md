@@ -1,4 +1,4 @@
-# panther-slim
+# Aquafinder
 
 Make Mac OS X 10.3.9 Panther look and fit better on small screens, like 800×600 G3 iBooks.
 
@@ -23,25 +23,25 @@ Make Mac OS X 10.3.9 Panther look and fit better on small screens, like 800×600
 
 ## Install
 
-1. Copy [`dist/panther-slim.sh`](dist/panther-slim.sh) to the Mac (a USB stick works).
+1. Copy [`dist/aquafinder.sh`](dist/aquafinder.sh) to the Mac (a USB stick works).
 2. Open Terminal and run:
 
    ```sh
-   sudo sh panther-slim.sh install
+   sudo sh aquafinder.sh install
    ```
 
 3. Restart the Mac.
 
 You can also install just one part: `install finder` or `install titlebars`.
-Check what's installed with `sh panther-slim.sh status`.
+Check what's installed with `sh aquafinder.sh status`.
 
 ## Undo
 
 ```sh
-sudo sh panther-slim.sh restore
+sudo sh aquafinder.sh restore
 ```
 
-Then restart. The original files are kept in `/Library/PantherSlim/`.
+Then restart. The original files are kept in `/Library/Aquafinder/`.
 
 ## Good to know
 
@@ -70,7 +70,7 @@ Then restart. The original files are kept in `/Library/PantherSlim/`.
 The `tools/` folder has everything used to build the script: a small PowerPC disassembler,
 the patch definitions (`patch.py`, `appkit_patch.py`, `theme.py`) and helpers for testing in QEMU.
 
-To rebuild `dist/panther-slim.sh`, put your own copies of the Apple files in `orig/` and `theme/`
+To rebuild `dist/aquafinder.sh`, put your own copies of the Apple files in `orig/` and `theme/`
 (they aren't in this repo), then run:
 
 ```sh

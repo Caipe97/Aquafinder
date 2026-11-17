@@ -1,4 +1,4 @@
-"""Generate dist/panther-slim.sh: a self-contained Panther shell script that
+"""Generate dist/aquafinder.sh: a self-contained Panther shell script that
 installs/restores two independent components on an iBook:
 
   finder     Aqua (non-brushed-metal) Finder windows with toolbar + sidebar
@@ -100,16 +100,16 @@ known_finder, known_theme, known_appkit = ident_block('finder'), ident_block('ti
 edits = '\n'.join("  %s)\n%s\n    ;;" % (key, e) for c, key, lbl, sk, cn, o, n, e in entries)
 
 script = r'''#!/bin/sh
-# panther-slim for Mac OS X 10.3.9 (Panther).
+# Aquafinder for Mac OS X 10.3.9 (Panther).
 #
 #   finder     Aqua (non-brushed-metal) Finder windows that keep toolbar + sidebar,
 #              a Jaguar-style soft shadow for the bottom bar and softer pane borders
 #   titlebars  Jaguar-style pinstriped, translucent window title bars
 #              (the HIToolbox theme, plus AppKit so Cocoa windows blend too)
 #
-#   sh panther-slim.sh status
-#   sudo sh panther-slim.sh install [finder|titlebars]     (default: both)
-#   sudo sh panther-slim.sh restore [finder|titlebars]     (default: both)
+#   sh aquafinder.sh status
+#   sudo sh aquafinder.sh install [finder|titlebars]     (default: both)
+#   sudo sh aquafinder.sh restore [finder|titlebars]     (default: both)
 #
 # Only recognised files are touched (the Finder is identified by its code
 # section, so re-prebinding by Software Update doesn't matter). Each is backed up, patched
@@ -120,9 +120,10 @@ PATH=/bin:/sbin:/usr/bin:/usr/sbin; export PATH
 FINDER="${FINDER:-__FINDER__}"
 THEME="${THEME:-__THEME__}"
 APPKIT="${APPKIT:-__APPKIT__}"
-BACKUP_DIR="${BACKUP_DIR:-/Library/PantherSlim}"
+BACKUP_DIR="${BACKUP_DIR:-/Library/Aquafinder}"
+OLD_BACKUP_DIR=/Library/PantherSlim   # backups made under the old name
 
-die() { echo "panther-slim: $*" >&2; [ -n "$TMP" ] && rm -f "$TMP"; exit 1; }
+die() { echo "aquafinder: $*" >&2; [ -n "$TMP" ] && rm -f "$TMP"; exit 1; }
 sum() { md5 < "$1" | awk '{print $NF}'; }
 
 put() {   # put <offset> <count> <bytes as \ooo escapes>
@@ -164,7 +165,7 @@ __EDITS__
 }
 
 swap_in() {   # swap_in <src> <file>: atomic replace keeping owner/mode
-  TMP="$2.panther-slim-tmp"; rm -f "$TMP"
+  TMP="$2.aquafinder-tmp"; rm -f "$TMP"
   cp -p "$1" "$TMP" || die "cannot copy to $TMP"
 }
 
@@ -194,6 +195,7 @@ restore_one() {   # restore_one <file> <name>
     unknown)  echo "$2: unrecognised file (md5 $CUR), skipped."; return 1 ;;
   esac
   BK="$BACKUP_DIR/${F##*/}-$KEY.orig"
+  [ -f "$BK" ] || BK="$OLD_BACKUP_DIR/${F##*/}-$KEY.orig"
   [ -f "$BK" ] && [ "$(region "$BK" $SKIP $COUNT)" = "$ORIG" ] || die "$2: backup $BK missing or damaged."
   swap_in "$BK" "$F"
   mv -f "$TMP" "$F" || die "could not restore $F"; TMP=
@@ -205,7 +207,7 @@ status_one() {
   identify "$1" "$2"
   case "$STATE" in
     original) echo "$2: original ($LABEL)" ;;
-    patched)  echo "$2: panther-slim installed ($LABEL)" ;;
+    patched)  echo "$2: Aquafinder installed ($LABEL)" ;;
     *)        echo "$2: not recognised (md5 $CUR)" ;;
   esac
 }
@@ -253,7 +255,7 @@ exit $RC
 script = (script.replace('__KNOWN_FINDER__', known_finder).replace('__KNOWN_THEME__', known_theme).replace('__KNOWN_APPKIT__', known_appkit).replace('__EDITS__', edits)
           .replace('__FINDER__', FINDER_PATH).replace('__THEME__', THEME_PATH).replace('__APPKIT__', APPKIT_PATH))
 os.makedirs(os.path.join(ROOT, 'dist'), exist_ok=True)
-path = os.path.join(ROOT, 'dist', 'panther-slim.sh')
+path = os.path.join(ROOT, 'dist', 'aquafinder.sh')
 open(path, 'w').write(script)
 os.chmod(path, 0o755)
 for c, key, lbl, sk, cn, o, n, e in entries:

@@ -1,6 +1,6 @@
 #!/bin/sh
 # Wait until the Panther menu bar is visible in QEMU (max ~5 min).
-S=/private/tmp/claude-501/-Users-manuel-panther-slim/b59bf558-a1a7-4477-b568-353560e2a9c4/scratchpad
+S="${SHOTDIR:-${TMPDIR:-/tmp}}"
 T="$(dirname "$0")"
 sleep 20
 for i in $(seq 1 60); do

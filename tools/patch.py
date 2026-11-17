@@ -1,4 +1,4 @@
-"""Panther-slim Finder patcher: Aqua (non-metal) browser windows that keep
+"""Aquafinder Finder patcher: Aqua (non-metal) browser windows that keep
 the toolbar and sidebar.
 
 Patch sites are defined against the stock 10.3.9 (7W98) Finder. Re-prebound

@@ -1,14 +1,14 @@
 #!/bin/sh
-# panther-slim for Mac OS X 10.3.9 (Panther).
+# Aquafinder for Mac OS X 10.3.9 (Panther).
 #
 #   finder     Aqua (non-brushed-metal) Finder windows that keep toolbar + sidebar,
 #              a Jaguar-style soft shadow for the bottom bar and softer pane borders
 #   titlebars  Jaguar-style pinstriped, translucent window title bars
 #              (the HIToolbox theme, plus AppKit so Cocoa windows blend too)
 #
-#   sh panther-slim.sh status
-#   sudo sh panther-slim.sh install [finder|titlebars]     (default: both)
-#   sudo sh panther-slim.sh restore [finder|titlebars]     (default: both)
+#   sh aquafinder.sh status
+#   sudo sh aquafinder.sh install [finder|titlebars]     (default: both)
+#   sudo sh aquafinder.sh restore [finder|titlebars]     (default: both)
 #
 # Only recognised files are touched (the Finder is identified by its code
 # section, so re-prebinding by Software Update doesn't matter). Each is backed up, patched
@@ -19,9 +19,10 @@ PATH=/bin:/sbin:/usr/bin:/usr/sbin; export PATH
 FINDER="${FINDER:-/System/Library/CoreServices/Finder.app/Contents/MacOS/Finder}"
 THEME="${THEME:-/System/Library/Frameworks/Carbon.framework/Versions/A/Frameworks/HIToolbox.framework/Versions/A/Resources/Extras.rsrc}"
 APPKIT="${APPKIT:-/System/Library/Frameworks/AppKit.framework/Versions/C/AppKit}"
-BACKUP_DIR="${BACKUP_DIR:-/Library/PantherSlim}"
+BACKUP_DIR="${BACKUP_DIR:-/Library/Aquafinder}"
+OLD_BACKUP_DIR=/Library/PantherSlim   # backups made under the old name
 
-die() { echo "panther-slim: $*" >&2; [ -n "$TMP" ] && rm -f "$TMP"; exit 1; }
+die() { echo "aquafinder: $*" >&2; [ -n "$TMP" ] && rm -f "$TMP"; exit 1; }
 sum() { md5 < "$1" | awk '{print $NF}'; }
 
 put() {   # put <offset> <count> <bytes as \ooo escapes>
@@ -48,8 +49,8 @@ identify() {   # identify <file> <component>: sets KEY LABEL STATE SKIP COUNT WA
 identify_finder() {
   R=$(region "$1" 3 668)
   case "$R" in
-    bac164f989b5da7ba788b22be93035b2) KEY=finder1039; LABEL='Finder 10.3.9'; STATE=original; SKIP=3; COUNT=668; WANT=43d2b8988616caa9cb1d02cec83c4990; ORIG=bac164f989b5da7ba788b22be93035b2; return ;;
-    43d2b8988616caa9cb1d02cec83c4990) KEY=finder1039; LABEL='Finder 10.3.9'; STATE=patched;  SKIP=3; COUNT=668; WANT=43d2b8988616caa9cb1d02cec83c4990; ORIG=bac164f989b5da7ba788b22be93035b2; return ;;
+    bac164f989b5da7ba788b22be93035b2) KEY=finder1039; LABEL='Finder 10.3.9'; STATE=original; SKIP=3; COUNT=668; WANT=bfc33742ee7998de9da99d420abb1eb0; ORIG=bac164f989b5da7ba788b22be93035b2; return ;;
+    bfc33742ee7998de9da99d420abb1eb0) KEY=finder1039; LABEL='Finder 10.3.9'; STATE=patched;  SKIP=3; COUNT=668; WANT=bfc33742ee7998de9da99d420abb1eb0; ORIG=bac164f989b5da7ba788b22be93035b2; return ;;
   esac
 }
 identify_theme() {
@@ -70,6 +71,7 @@ identify_appkit() {
 apply_edits() {
   case "$1" in
   finder1039)
+    put 86111 9 '\015\261\077\000\370\070\102\377\363'
     put 136448 4 '\110\027\325\375'
     put 142092 136 '\110\000\000\204\174\010\002\246\220\001\000\010\224\041\377\240\223\341\000\134\174\177\033\170\300\245\000\004\174\244\204\252\071\041\000\100\174\251\205\252\075\040\000\052\300\051\376\110\300\141\000\104\377\203\050\000\100\236\000\030\354\143\010\052\320\141\000\104\300\201\000\114\354\204\010\050\320\201\000\114\374\100\010\220\110\032\111\111\177\343\373\170\071\041\000\100\174\211\204\252\110\031\367\211\203\341\000\134\070\041\000\140\200\001\000\010\174\010\003\246\116\200\000\040\110\031\356\261\110\000\000\034\110\047\303\200'
     put 171571 1 '\361'
@@ -114,7 +116,7 @@ apply_edits() {
 }
 
 swap_in() {   # swap_in <src> <file>: atomic replace keeping owner/mode
-  TMP="$2.panther-slim-tmp"; rm -f "$TMP"
+  TMP="$2.aquafinder-tmp"; rm -f "$TMP"
   cp -p "$1" "$TMP" || die "cannot copy to $TMP"
 }
 
@@ -144,6 +146,7 @@ restore_one() {   # restore_one <file> <name>
     unknown)  echo "$2: unrecognised file (md5 $CUR), skipped."; return 1 ;;
   esac
   BK="$BACKUP_DIR/${F##*/}-$KEY.orig"
+  [ -f "$BK" ] || BK="$OLD_BACKUP_DIR/${F##*/}-$KEY.orig"
   [ -f "$BK" ] && [ "$(region "$BK" $SKIP $COUNT)" = "$ORIG" ] || die "$2: backup $BK missing or damaged."
   swap_in "$BK" "$F"
   mv -f "$TMP" "$F" || die "could not restore $F"; TMP=
@@ -155,7 +158,7 @@ status_one() {
   identify "$1" "$2"
   case "$STATE" in
     original) echo "$2: original ($LABEL)" ;;
-    patched)  echo "$2: panther-slim installed ($LABEL)" ;;
+    patched)  echo "$2: Aquafinder installed ($LABEL)" ;;
     *)        echo "$2: not recognised (md5 $CUR)" ;;
   esac
 }
