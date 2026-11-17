@@ -10,13 +10,15 @@ installs/restores independent components on an iBook:
 """
 import sys, hashlib, os
 sys.path.insert(0, os.path.dirname(__file__))
-import patch, theme, appkit_patch, logo
+import patch, theme, appkit_patch, logo, grip
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 FINDER_PATH = '/System/Library/CoreServices/Finder.app/Contents/MacOS/Finder'
 THEME_PATH = ('/System/Library/Frameworks/Carbon.framework/Versions/A/Frameworks/'
               'HIToolbox.framework/Versions/A/Resources/Extras.rsrc')
 APPKIT_PATH = '/System/Library/Frameworks/AppKit.framework/Versions/C/AppKit'
+GRIP_PATH = '/System/Library/CoreServices/Finder.app/Contents/Resources/Finder.rsrc'
+GRIP_SRC = 'orig/Finder.rsrc'                        # 10.3.9 (same as 10.3.4's)
 FINDER_BUILDS = [('10.3.9', 'orig/Finder-10.3.9')]
 APPKIT_SRC = 'orig/appkit/AppKit-10.3.9'             # stock, from the 10.3.9 Combo
 THEME_SRC = 'theme/panther-10.3.9/Extras.rsrc'      # unchanged since 10.3.0 (the Combo doesn't ship it)
@@ -104,6 +106,12 @@ for ver, rel in FINDER_BUILDS:
     assert (sk2, cn2) == (skip, count)
     entries.append(('finder', key + 'top', lbl + ', top status bar', skip, count, mo, mt, edit_lines(a, b)))
     finder_builds.append((key, lbl, skip, count, mo, mp, mt))
+
+# The Finder's resources: the sidebar divider's grip, Jaguar's splitter ridges
+# instead of the metal dimple (installed and restored with the Finder).
+a = open(os.path.join(ROOT, GRIP_SRC), 'rb').read()
+b = grip.build(a, os.path.join(ROOT, JAGUAR_SRC))
+entries.append(('grip', 'finderrsrc', 'Finder divider grip', 0, 0, md5(a), md5(b), edit_lines(a, b)))
 
 theme_out = os.path.join(ROOT, 'build', 'Extras-jaguarbars.rsrc')
 import contextlib, io
@@ -193,6 +201,7 @@ def finder_ident():
 known_finder = finder_ident()
 known_theme, known_appkit = ident_block('titlebars'), ident_block('appkit')
 known_logo = ident_block('logo')
+known_grip = ident_block('grip')
 logo_paths = ' '.join(p for k, l, p, s in LOGO_FILES)
 assert ' ' not in ''.join(p for k, l, p, s in LOGO_FILES), 'LOGO_FILES is word-split in sh'
 edits = '\n'.join("  %s)\n%s\n    ;;" % (key, e) for c, key, lbl, sk, cn, o, n, e in entries)
@@ -202,6 +211,7 @@ script = r'''#!/bin/sh
 #
 #   finder     Aqua (non-brushed-metal) Finder windows that keep toolbar + sidebar,
 #              a Jaguar-style soft shadow for the bottom bar and softer pane borders
+#              (plus the Finder's resources: Jaguar's ridges as the sidebar grip)
 #   topbar     option for finder: the status bar under the toolbar, as in Jaguar,
 #              instead of at the bottom (restore topbar puts it back at the bottom)
 #   titlebars  Jaguar-style pinstriped, translucent window title bars
@@ -225,6 +235,7 @@ PATH=/bin:/sbin:/usr/bin:/usr/sbin; export PATH
 FINDER="${FINDER:-__FINDER__}"
 THEME="${THEME:-__THEME__}"
 APPKIT="${APPKIT:-__APPKIT__}"
+GRIP="${GRIP:-__GRIP__}"
 BACKUP_DIR="${BACKUP_DIR:-/Library/Aquafinder}"
 OLD_BACKUP_DIR=/Library/PantherSlim   # backups made under the old name
 
@@ -250,6 +261,7 @@ identify() {   # identify <file> <component>: sets KEY LABEL STATE SKIP COUNT WA
     finder|topbar) identify_finder "$1" ;;
     titlebars) identify_theme "$1" ;;
     appkit)    identify_appkit "$1" ;;
+    grip)      identify_grip "$1" ;;
     logo)      identify_logo "$1" ;;
   esac
 }
@@ -269,6 +281,9 @@ __KNOWN_APPKIT__
 }
 identify_logo() {
 __KNOWN_LOGO__
+}
+identify_grip() {
+__KNOWN_GRIP__
 }
 LOGO_FILES="${LOGO_FILES:-__LOGO_PATHS__}"   # each is a separate file; status/install/restore go through all
 
@@ -366,7 +381,7 @@ status_topbar() {   # one line for the option: installed = status bar at the top
 
 finish() {
   [ -n "$NO_RESTART" ] && return 0
-  case "$CHANGED" in *finder*|*topbar*)
+  case "$CHANGED" in *finder*|*topbar*|*grip*)
     # no killall without the optional BSD Subsystem; ps is in /bin
     for P in $(ps -axc | awk '$NF == "Finder" {print $1}'); do kill "$P" 2>/dev/null; done
     echo "Finder restarted." ;;
@@ -391,20 +406,21 @@ CHANGED=; RC=0
 case "$1" in
   install)
     need_root install
-    want finder    && { install_one "$FINDER" finder || RC=1; }
+    want finder    && { install_one "$FINDER" finder || RC=1; install_one "$GRIP" grip || RC=1; }
     [ "$WHAT" = topbar ] && { FINDER_STYLE=top; install_one "$FINDER" topbar || RC=1; FINDER_STYLE=; }
     want titlebars && { install_one "$THEME" titlebars || RC=1; install_one "$APPKIT" appkit || RC=1; }
     want logo      && for F in $LOGO_FILES; do install_one "$F" logo || RC=1; done
     finish ;;
   restore|uninstall)
     need_root restore
-    want finder    && { restore_one "$FINDER" finder || RC=1; }
+    want finder    && { restore_one "$FINDER" finder || RC=1; restore_one "$GRIP" grip || RC=1; }
     [ "$WHAT" = topbar ] && { topbar_off || RC=1; }
     want titlebars && { restore_one "$THEME" titlebars || RC=1; restore_one "$APPKIT" appkit || RC=1; }
     want logo      && for F in $LOGO_FILES; do restore_one "$F" logo || RC=1; done
     finish ;;
   status|"")
     status_one "$FINDER" finder
+    status_one "$GRIP" grip
     status_topbar
     status_one "$THEME" titlebars
     status_one "$APPKIT" appkit
@@ -413,8 +429,8 @@ case "$1" in
 esac
 exit $RC
 '''
-script = (script.replace('__KNOWN_FINDER__', known_finder).replace('__KNOWN_THEME__', known_theme).replace('__KNOWN_APPKIT__', known_appkit).replace('__KNOWN_LOGO__', known_logo).replace('__LOGO_PATHS__', logo_paths).replace('__EDITS__', edits)
-          .replace('__FINDER__', FINDER_PATH).replace('__THEME__', THEME_PATH).replace('__APPKIT__', APPKIT_PATH))
+script = (script.replace('__KNOWN_FINDER__', known_finder).replace('__KNOWN_THEME__', known_theme).replace('__KNOWN_APPKIT__', known_appkit).replace('__KNOWN_LOGO__', known_logo).replace('__KNOWN_GRIP__', known_grip).replace('__LOGO_PATHS__', logo_paths).replace('__EDITS__', edits)
+          .replace('__FINDER__', FINDER_PATH).replace('__THEME__', THEME_PATH).replace('__APPKIT__', APPKIT_PATH).replace('__GRIP__', GRIP_PATH))
 os.makedirs(os.path.join(ROOT, 'dist'), exist_ok=True)
 path = os.path.join(ROOT, 'dist', 'aquafinder.sh')
 open(path, 'w').write(script)

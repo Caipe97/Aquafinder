@@ -28,7 +28,7 @@ typedef struct {
 /* An option row comes right after its parent, so Apply runs the parent's
  * install/restore first. */
 static const Part PARTS[] = {
-    { "finder", "finder", "Aqua Finder windows",
+    { "finder", "finder grip", "Aqua Finder windows",
       "Plain Aqua instead of brushed metal, a slim 15 px bottom bar with a soft shadow, and lighter pane lines.", NO, -1 },
     { "topbar", "topbar", "Status bar under the toolbar",
       "As in Jaguar: the item count sits under the toolbar, and the files run to the bottom of the window.", NO, 0 },

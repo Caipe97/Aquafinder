@@ -10,7 +10,8 @@ Make Mac OS X 10.3.9 Panther look and fit better on small screens, like 800×600
 - Plain Aqua windows instead of brushed metal. The toolbar and sidebar stay.
 - A thinner bottom bar (15 px, the same height as the resize corner) with a soft Jaguar-style shadow.
 - Lighter, softer lines around the panes.
-- The sidebar divider redraws cleanly when you drag it or resize the window.
+- The sidebar divider redraws cleanly when you drag it or resize the window, and its grip is
+  Jaguar's two thin ridges instead of the dot that was pressed into the metal.
 - A smaller loading spinner (13 px) that fits the thinner bar. It comes from the system theme,
   so it's installed with the title bars and every spinner in the system gets the same size.
 

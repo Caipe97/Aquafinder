@@ -3,6 +3,7 @@
 #
 #   finder     Aqua (non-brushed-metal) Finder windows that keep toolbar + sidebar,
 #              a Jaguar-style soft shadow for the bottom bar and softer pane borders
+#              (plus the Finder's resources: Jaguar's ridges as the sidebar grip)
 #   topbar     option for finder: the status bar under the toolbar, as in Jaguar,
 #              instead of at the bottom (restore topbar puts it back at the bottom)
 #   titlebars  Jaguar-style pinstriped, translucent window title bars
@@ -26,6 +27,7 @@ PATH=/bin:/sbin:/usr/bin:/usr/sbin; export PATH
 FINDER="${FINDER:-/System/Library/CoreServices/Finder.app/Contents/MacOS/Finder}"
 THEME="${THEME:-/System/Library/Frameworks/Carbon.framework/Versions/A/Frameworks/HIToolbox.framework/Versions/A/Resources/Extras.rsrc}"
 APPKIT="${APPKIT:-/System/Library/Frameworks/AppKit.framework/Versions/C/AppKit}"
+GRIP="${GRIP:-/System/Library/CoreServices/Finder.app/Contents/Resources/Finder.rsrc}"
 BACKUP_DIR="${BACKUP_DIR:-/Library/Aquafinder}"
 OLD_BACKUP_DIR=/Library/PantherSlim   # backups made under the old name
 
@@ -51,6 +53,7 @@ identify() {   # identify <file> <component>: sets KEY LABEL STATE SKIP COUNT WA
     finder|topbar) identify_finder "$1" ;;
     titlebars) identify_theme "$1" ;;
     appkit)    identify_appkit "$1" ;;
+    grip)      identify_grip "$1" ;;
     logo)      identify_logo "$1" ;;
   esac
 }
@@ -117,6 +120,13 @@ identify_logo() {
     646d8d4f3381afd63b081c63ee5aff62) KEY=dockfinder; LABEL='Dock Finder icon'; STATE=patched;  SKIP=0; COUNT=0; WANT=646d8d4f3381afd63b081c63ee5aff62; ORIG=6844fd626e257c83adea520f714ae757; return ;;
   esac
 }
+identify_grip() {
+  R=$(region "$1" 0 0)
+  case "$R" in
+    662c9a9afaa1f4f8e64fdf6def079772) KEY=finderrsrc; LABEL='Finder divider grip'; STATE=original; SKIP=0; COUNT=0; WANT=f6984330ad8107df5e82101999531d13; ORIG=662c9a9afaa1f4f8e64fdf6def079772; return ;;
+    f6984330ad8107df5e82101999531d13) KEY=finderrsrc; LABEL='Finder divider grip'; STATE=patched;  SKIP=0; COUNT=0; WANT=f6984330ad8107df5e82101999531d13; ORIG=662c9a9afaa1f4f8e64fdf6def079772; return ;;
+  esac
+}
 LOGO_FILES="${LOGO_FILES:-/System/Library/CoreServices/loginwindow.app/Contents/Resources/MacOSX.tif /System/Library/CoreServices/SecurityAgent.app/Contents/Resources/MacOSXart.tif /System/Library/CoreServices/SecurityAgentPlugins/loginwindow.bundle/Contents/Resources/MacOSXart.tif /System/Library/CoreServices/Finder.app/Contents/Resources/Finder.icns /System/Library/CoreServices/SystemIcons.bundle/Contents/Resources/FinderIcon.icns /System/Library/CoreServices/Dock.app/Contents/Resources/finder.png}"   # each is a separate file; status/install/restore go through all
 
 apply_edits() {
@@ -161,6 +171,10 @@ apply_edits() {
     put 1698498 2 '\377\310'
     put 1698540 52 '\073\300\000\001\070\000\000\000\220\001\000\240\110\000\000\070\174\010\002\246\220\001\000\010\224\041\377\240\223\341\000\134\113\350\263\011\200\173\000\000\177\244\353\170\177\245\353\170\113\350\100\004'
     put 2748176 188 '\200\037\001\040\057\200\000\000\101\236\000\250\070\140\000\064\070\200\000\040\070\240\000\001\113\362\135\361\177\303\363\170\113\362\056\251\224\041\377\200\070\141\000\100\113\362\066\315\070\141\000\130\113\362\055\225\200\141\000\130\070\201\000\130\113\362\050\071\070\000\243\243\260\001\000\140\260\001\000\142\260\001\000\144\070\141\000\140\113\362\064\001\250\241\000\130\260\241\000\150\070\005\000\001\260\001\000\154\250\001\000\132\260\001\000\152\250\001\000\136\260\001\000\156\070\141\000\150\113\362\065\111\250\241\000\130\070\245\000\023\260\241\000\150\070\005\000\001\260\001\000\154\070\141\000\150\113\362\065\055\070\141\000\100\113\362\063\265\070\041\000\200\113\330\073\354\070\140\000\064\113\330\073\320\077\124\324\325'
+    ;;
+  finderrsrc)
+    put 125395 14 '\003\000\000\000\012\010\006\000\000\000\161\047\344\167'
+    put 125493 123 '\116\164\105\130\164\103\157\155\155\145\156\164\000\040\040\040\040\040\040\040\040\040\040\040\040\040\040\040\040\040\040\040\040\040\040\040\040\040\040\040\040\040\040\040\040\040\040\040\040\040\040\040\040\040\040\040\040\040\040\040\040\040\040\040\040\040\040\040\040\040\040\040\040\040\040\040\040\040\040\040\040\040\040\131\016\121\247\000\000\000\030\111\104\101\124\170\332\143\230\067\157\336\177\006\040\230\061\143\306\177\206\201\340\000\000\100\254\070\101\011\032\005\113'
     ;;
   theme)
     put 34199 21 '\000\000\000\000\000\000\000\000\000\000\000\000\000\000\000\000\000\000\000\000\000'
@@ -721,7 +735,7 @@ status_topbar() {   # one line for the option: installed = status bar at the top
 
 finish() {
   [ -n "$NO_RESTART" ] && return 0
-  case "$CHANGED" in *finder*|*topbar*)
+  case "$CHANGED" in *finder*|*topbar*|*grip*)
     # no killall without the optional BSD Subsystem; ps is in /bin
     for P in $(ps -axc | awk '$NF == "Finder" {print $1}'); do kill "$P" 2>/dev/null; done
     echo "Finder restarted." ;;
@@ -746,20 +760,21 @@ CHANGED=; RC=0
 case "$1" in
   install)
     need_root install
-    want finder    && { install_one "$FINDER" finder || RC=1; }
+    want finder    && { install_one "$FINDER" finder || RC=1; install_one "$GRIP" grip || RC=1; }
     [ "$WHAT" = topbar ] && { FINDER_STYLE=top; install_one "$FINDER" topbar || RC=1; FINDER_STYLE=; }
     want titlebars && { install_one "$THEME" titlebars || RC=1; install_one "$APPKIT" appkit || RC=1; }
     want logo      && for F in $LOGO_FILES; do install_one "$F" logo || RC=1; done
     finish ;;
   restore|uninstall)
     need_root restore
-    want finder    && { restore_one "$FINDER" finder || RC=1; }
+    want finder    && { restore_one "$FINDER" finder || RC=1; restore_one "$GRIP" grip || RC=1; }
     [ "$WHAT" = topbar ] && { topbar_off || RC=1; }
     want titlebars && { restore_one "$THEME" titlebars || RC=1; restore_one "$APPKIT" appkit || RC=1; }
     want logo      && for F in $LOGO_FILES; do restore_one "$F" logo || RC=1; done
     finish ;;
   status|"")
     status_one "$FINDER" finder
+    status_one "$GRIP" grip
     status_topbar
     status_one "$THEME" titlebars
     status_one "$APPKIT" appkit
