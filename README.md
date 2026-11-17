@@ -11,8 +11,11 @@ Make Mac OS X 10.3.9 Panther look and fit better on small screens, like 800×600
 - A thinner bottom bar (15 px, the same height as the resize corner) with a soft Jaguar-style shadow.
 - Lighter, softer lines around the panes.
 - The sidebar divider redraws cleanly when you drag it or resize the window.
+- A smaller loading spinner (13 px) that fits the thinner bar. It comes from the system theme,
+  so it's installed with the title bars and every spinner in the system gets the same size.
 
 ![Slim bottom bar](screens/8-slim-bar.png)
+![Loading spinner in the bottom bar](screens/11-spinner.png)
 
 **Title bars**
 - Pinstriped title bars from Jaguar (10.2) in every app.
@@ -31,6 +34,9 @@ Make Mac OS X 10.3.9 Panther look and fit better on small screens, like 800×600
    ```
 
 3. Restart the Mac.
+
+To **update** to a newer version, run the same `install` command with the new script and restart.
+It upgrades files patched by an older version, starting from the saved originals.
 
 You can also install just one part: `install finder` or `install titlebars`.
 Check what's installed with `sh aquafinder.sh status`.

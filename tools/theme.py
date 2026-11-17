@@ -52,3 +52,24 @@ if __name__ == '__main__':
     transplant(sys.argv[1], sys.argv[2], sys.argv[3],
                [int(x) for x in sys.argv[4].split(',')],
                preview_dir=os.environ.get('PREVIEW_DIR'))
+
+
+def shrink_frames(in_path, out_path, res_id, size, offset):
+    """Resample every frame of pxm# res_id to size x size, placed at
+    (offset, offset) inside its unchanged canvas (rest transparent).
+    Pixels are premultiplied RGBA; resampling premultiplied values is correct."""
+    from PIL import Image
+    rf = ResFile(open(in_path, 'rb').read())
+    key = ('pxm#', res_id)
+    d = rf.res[key]['data']
+    ims, ms = pxm.decode(d)
+    out = []
+    for im in ims:
+        small = im.resize((size, size), Image.LANCZOS)
+        c = Image.new('RGBA', im.size, (0, 0, 0, 0))
+        c.paste(small, (offset, offset))
+        out.append(c)
+    new = pxm.encode(d, out, ms)
+    data = rf.patched_in_place({key: new})
+    assert ResFile(data).res[key]['data'] == new
+    open(out_path, 'wb').write(data)

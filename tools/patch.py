@@ -55,10 +55,11 @@ PATCHES = [
     ('slimbar', 0x48958, 0x38000012, 0x3800000f, 'window layout: bottom bar height 18 -> 15'),
     ('slimbar', 0x2ae30, 0x3842ffee, 0x3842fff1, 'status bar rect: top = bottom - 18 -> - 15'),
     ('slimbar', 0x2ae48, 0x38420012, 0x3842000f, 'status bar rect: bottom = top + 18 -> + 15'),
-    # loading spinner in the status bar: 16x16 at row 1 of the bar -> 13x13,
-    # so it fits the 15-row bar with a row free above and below
-    ('slimbar', 0x1605c, 0x39290010, 0x3929000d, 'status bar spinner: bottom = top + 16 -> + 13'),
-    ('slimbar', 0x16064, 0x3842fff0, 0x3842fff3, 'status bar spinner: left = right - 16 -> - 13'),
+    # loading spinner (16x16 theme art, drawn bottom-aligned in its rect): the
+    # rect ended 2 rows below the 15-row bar. Bottom = top + 14 puts the
+    # canvas on the border line + bar; the theme's arrows are shrunk to 13 px
+    # (theme.shrink_frames) so they sit on bar rows 1..13.
+    ('slimbar', 0x1605c, 0x39290010, 0x3929000e, 'status bar spinner: bottom = top + 16 -> + 14'),
 ]
 SET_NAMES = ['nometal', 'square', 'statusbar', 'gap', 'shadow', 'softlines', 'slimbar']
 SETS = {n: {p[1]: p for p in PATCHES if p[0] == n} for n in SET_NAMES}

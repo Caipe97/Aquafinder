@@ -16,7 +16,10 @@ def header(d):
 
 def _geom(d):
     h = header(d); w, ht, n = h['w'], h['h'], h['count']
-    assert h['depth'] == 32, 'only 32-bit pxm# supported (depth %d)' % h['depth']
+    # 32-bit RGBA pixels (flags bit 2); the header's depth field isn't
+    # reliable (AsyncArrows says 16 but stores 32-bit pixels), so we check
+    # the layout by size instead.
+    assert h['flags'] & 4, 'only 32-bit (flags & 4) pxm# supported'
     rb = ((w + 15) // 16) * 2
     msize, isize = rb * ht, w * ht * 4
     nmask = n if 24 + n*msize + n*isize == len(d) else 1

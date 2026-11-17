@@ -77,6 +77,8 @@ theme_out = os.path.join(ROOT, 'build', 'Extras-jaguarbars.rsrc')
 import contextlib, io
 with contextlib.redirect_stdout(io.StringIO()):
     theme.transplant(os.path.join(ROOT, THEME_SRC), os.path.join(ROOT, JAGUAR_SRC), theme_out, THEME_IDS)
+    # loading spinner art 16 -> 13 px, so it fits the 15 px bottom bar
+    theme.shrink_frames(theme_out, theme_out, 390, 13, 2)
 a, b = open(os.path.join(ROOT, THEME_SRC), 'rb').read(), open(theme_out, 'rb').read()
 entries.append(('titlebars', 'theme', 'Panther theme', 0, 0, md5(a), md5(b), edit_lines(a, b)))
 
@@ -86,6 +88,20 @@ a, b = open(src, 'rb').read(), open(out, 'rb').read()
 skip, count, mo, mp = text_region(src, a, b)
 entries.append(('appkit', 'appkit1039', 'AppKit 10.3.9', skip, count, mo, mp, edit_lines(a, b)))
 
+# Every patched fingerprint ever released (tools/released.txt), so the script
+# can recognise files patched by an older Aquafinder and upgrade them.
+RELEASED = os.path.join(ROOT, 'tools', 'released.txt')
+released = []
+for line in open(RELEASED):
+    if line.strip() and not line.startswith('#'):
+        k, sk, cn, h = line.split()
+        released.append((k, int(sk), int(cn), h))
+for c, key, lbl, skip, count, o, n, e in entries:
+    if (key, skip, count, n) not in released:
+        released.append((key, skip, count, n))
+        with open(RELEASED, 'a') as f:
+            f.write('%s %d %d %s\n' % (key, skip, count, n))
+
 def ident_block(comp):
     out = []
     for c, key, lbl, skip, count, o, n, e in entries:
@@ -94,6 +110,16 @@ def ident_block(comp):
         out.append('  case "$R" in')
         out.append("    %s) KEY=%s; LABEL='%s'; STATE=original; SKIP=%d; COUNT=%d; WANT=%s; ORIG=%s; return ;;" % (o, key, lbl, skip, count, n, o))
         out.append("    %s) KEY=%s; LABEL='%s'; STATE=patched;  SKIP=%d; COUNT=%d; WANT=%s; ORIG=%s; return ;;" % (n, key, lbl, skip, count, n, o))
+        for k, sk, cn, h in released:
+            if k == key and h != n:
+                if (sk, cn) != (skip, count):   # an old release hashed a different span
+                    out.append('  esac')
+                    out.append('  R2=$(region "$1" %d %d)' % (sk, cn))
+                    out.append('  case "$R2" in')
+                out.append("    %s) KEY=%s; LABEL='%s'; STATE=oldpatch; SKIP=%d; COUNT=%d; WANT=%s; ORIG=%s; return ;;" % (h, key, lbl, skip, count, n, o))
+                if (sk, cn) != (skip, count):
+                    out.append('  esac')
+                    out.append('  case "$R" in')
         out.append('  esac')
     return '\n'.join(out)
 known_finder, known_theme, known_appkit = ident_block('finder'), ident_block('titlebars'), ident_block('appkit')
@@ -169,22 +195,35 @@ swap_in() {   # swap_in <src> <file>: atomic replace keeping owner/mode
   cp -p "$1" "$TMP" || die "cannot copy to $TMP"
 }
 
+find_backup() {   # find_backup <file>: sets BK to a verified original, or fails
+  BK="$BACKUP_DIR/${1##*/}-$KEY.orig"
+  [ -f "$BK" ] || BK="$OLD_BACKUP_DIR/${1##*/}-$KEY.orig"
+  [ -f "$BK" ] && [ "$(region "$BK" $SKIP $COUNT)" = "$ORIG" ]
+}
+
 install_one() {   # install_one <file> <name>
-  F="$1"; identify "$F" "$2"
+  F="$1"; identify "$F" "$2"; HOW=installed
   case "$STATE" in
     patched) echo "$2: already installed ($LABEL)."; return 0 ;;
     unknown) echo "$2: unrecognised $F (md5 $CUR), skipped. Nothing changed."; return 1 ;;
+    oldpatch)
+      # patched by an older Aquafinder: re-patch starting from the saved original
+      find_backup "$F" || { echo "$2: patched by an older Aquafinder, but its original backup is missing; skipped."; return 1; }
+      SRC="$BK"; HOW="updated from an older Aquafinder" ;;
+    original)
+      mkdir -p "$BACKUP_DIR" || die "cannot create $BACKUP_DIR"
+      BK="$BACKUP_DIR/${F##*/}-$KEY.orig"
+      if [ ! -f "$BK" ] || [ "$(region "$BK" $SKIP $COUNT)" != "$ORIG" ]; then
+        cp -p "$F" "$BK" || die "backup failed"
+      fi
+      SRC="$F" ;;
   esac
-  mkdir -p "$BACKUP_DIR" || die "cannot create $BACKUP_DIR"
-  BK="$BACKUP_DIR/${F##*/}-$KEY.orig"
-  if [ ! -f "$BK" ] || [ "$(region "$BK" $SKIP $COUNT)" != "$ORIG" ]; then
-    cp -p "$F" "$BK" || die "backup failed"
-  fi
-  swap_in "$F" "$F"
+  swap_in "$F" "$F"                                 # copy keeps owner and mode
+  [ "$SRC" = "$F" ] || cat "$SRC" > "$TMP" || die "cannot copy $SRC"
   apply_edits "$KEY"
-  [ "$(region "$TMP" $SKIP $COUNT)" = "$WANT" ] || die "$2: patched copy failed verification; original untouched."
+  [ "$(region "$TMP" $SKIP $COUNT)" = "$WANT" ] || die "$2: patched copy failed verification; nothing changed."
   mv -f "$TMP" "$F" || die "could not replace $F"; TMP=
-  echo "$2: installed ($LABEL). Backup: $BK"
+  echo "$2: $HOW ($LABEL). Backup: $BK"
   CHANGED="$CHANGED $2"
 }
 
@@ -194,9 +233,7 @@ restore_one() {   # restore_one <file> <name>
     original) echo "$2: already original ($LABEL)."; return 0 ;;
     unknown)  echo "$2: unrecognised file (md5 $CUR), skipped."; return 1 ;;
   esac
-  BK="$BACKUP_DIR/${F##*/}-$KEY.orig"
-  [ -f "$BK" ] || BK="$OLD_BACKUP_DIR/${F##*/}-$KEY.orig"
-  [ -f "$BK" ] && [ "$(region "$BK" $SKIP $COUNT)" = "$ORIG" ] || die "$2: backup $BK missing or damaged."
+  find_backup "$F" || die "$2: backup $BK missing or damaged."
   swap_in "$BK" "$F"
   mv -f "$TMP" "$F" || die "could not restore $F"; TMP=
   echo "$2: restored original ($LABEL)."
@@ -208,6 +245,7 @@ status_one() {
   case "$STATE" in
     original) echo "$2: original ($LABEL)" ;;
     patched)  echo "$2: Aquafinder installed ($LABEL)" ;;
+    oldpatch) echo "$2: older Aquafinder installed ($LABEL); run install to update" ;;
     *)        echo "$2: not recognised (md5 $CUR)" ;;
   esac
 }

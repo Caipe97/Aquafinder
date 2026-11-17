@@ -1,0 +1,11 @@
+# Every patched fingerprint an Aquafinder release has produced, per file key.
+# The installer treats a file with one of these as "patched by an older
+# version" and upgrades it from its saved original. tools/mkinstaller.py
+# appends new ones automatically; never remove lines.
+# key skip count md5
+finder1039 3 668 43d2b8988616caa9cb1d02cec83c4990
+finder1039 3 668 bfc33742ee7998de9da99d420abb1eb0
+theme 0 0 606be72eb4b1df32cdc0b497dcdbc050
+appkit1039 2 1278 2f29e6031a12bdfaf6c3f8935fcb22c5
+finder1039 3 668 df02d7ed292a35e280fadba6fb301e2e
+theme 0 0 5178aa51a495488578c53b6b46ff9540
