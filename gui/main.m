@@ -29,9 +29,7 @@ typedef struct {
  * install/restore first. */
 static const Part PARTS[] = {
     { "finder", "finder grip", "Aqua Finder windows",
-      "Plain Aqua instead of brushed metal, a slim 15 px bottom bar with a soft shadow, and lighter pane lines.", NO, -1 },
-    { "topbar", "topbar", "Status bar under the toolbar",
-      "As in Jaguar: the item count sits under the toolbar, and the files run to the bottom of the window.", NO, 0 },
+      "Plain Aqua instead of brushed metal, the item count under the toolbar as in Jaguar, and a sidebar divider like the column view's.", NO, -1 },
     { "titlebars", "titlebars appkit", "Jaguar title bars",
       "Pinstriped title bars from 10.2 in every app, see-through when inactive, and a smaller loading spinner. Needs a restart.", YES, -1 },
     { "logo", "logo", "Jaguar logo and Finder icon",

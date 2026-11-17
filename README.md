@@ -8,21 +8,15 @@ Make Mac OS X 10.3.9 Panther look and fit better on small screens, like 800×600
 
 **Finder**
 - Plain Aqua windows instead of brushed metal. The toolbar and sidebar stay.
-- A thinner bottom bar (15 px, the same height as the resize corner) with a soft Jaguar-style shadow.
-- Lighter, softer lines around the panes.
-- The sidebar divider redraws cleanly when you drag it or resize the window, and its grip is
-  Jaguar's two thin ridges instead of the dot that was pressed into the metal.
-- A smaller loading spinner (13 px) that fits the thinner bar. It comes from the system theme,
-  so it's installed with the title bars and every spinner in the system gets the same size.
-
-![Bottom bar: stock (top) and Aquafinder (bottom)](screens/bottom-bar.png)
-![Loading spinner in the bottom bar](screens/11-spinner.png)
-
-**Option: status bar under the toolbar**
-- As in Jaguar, the item count sits under the toolbar, between two thin lines, instead of at the bottom.
-- The sidebar and files run to the bottom of the window, and the resize corner sits in the
-  scroll bar's corner as in any Aqua window.
-- Off by default. Turn it on in the Aquafinder app, or with `install topbar` (see below).
+- As in Jaguar, the item count sits under the toolbar, between two thin lines, instead of in a
+  bar at the bottom. The sidebar and files run to the bottom of the window, and the resize corner
+  sits in the scroll bar's corner as in any Aqua window.
+- The sidebar divider looks like the column view's dividers, as in Jaguar: a soft 15 px gray
+  gradient with its grip near the bottom, and no other lines around the panes. Collapse the
+  sidebar and the divider stays at the window's left edge, so you can drag it back out.
+- The sidebar divider redraws cleanly when you drag it or resize the window.
+- A smaller loading spinner (13 px). It comes from the system theme, so it's installed with the
+  title bars and every spinner in the system gets the same size.
 
 ![Status bar under the toolbar](screens/topbar.png)
 
@@ -72,9 +66,6 @@ It upgrades files patched by an older version, starting from the saved originals
 
 You can also install just one part: `install finder`, `install titlebars` or `install logo`.
 Check what's installed with `sh aquafinder.sh status`.
-
-To put the Finder's status bar under the toolbar, run `sudo sh aquafinder.sh install topbar`.
-`restore topbar` moves it back to the bottom. Updating with `install` keeps the style you chose.
 
 ## Undo
 

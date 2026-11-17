@@ -2,10 +2,9 @@
 # Aquafinder for Mac OS X 10.3.9 (Panther).
 #
 #   finder     Aqua (non-brushed-metal) Finder windows that keep toolbar + sidebar,
-#              a Jaguar-style soft shadow for the bottom bar and softer pane borders
-#              (plus the Finder's resources: Jaguar's ridges as the sidebar grip)
-#   topbar     option for finder: the status bar under the toolbar, as in Jaguar,
-#              instead of at the bottom (restore topbar puts it back at the bottom)
+#              the status bar under the toolbar as in Jaguar, and a sidebar divider
+#              drawn like the column view's (plus the Finder's resources: the
+#              divider's image)
 #   titlebars  Jaguar-style pinstriped, translucent window title bars
 #              (the HIToolbox theme, plus AppKit so Cocoa windows blend too)
 #
@@ -13,10 +12,8 @@
 #   logo       Jaguar branding: Garamond "Mac OS X" in About This Mac and the
 #              login panel, and Jaguar's Finder icon in the Finder and Dock
 #
-#   sudo sh aquafinder.sh install [finder|topbar|titlebars|logo]   (default: all)
-#   sudo sh aquafinder.sh restore [finder|topbar|titlebars|logo]   (default: all)
-#
-# install finder (and install all) keeps the Finder's current status bar style.
+#   sudo sh aquafinder.sh install [finder|titlebars|logo]   (default: all)
+#   sudo sh aquafinder.sh restore [finder|titlebars|logo]   (default: all)
 #
 # Only recognised files are touched (the Finder is identified by its code
 # section, so re-prebinding by Software Update doesn't matter). Each is backed up, patched
@@ -48,44 +45,50 @@ region() {   # region <file> <skip> <count>: md5 of 4 KiB blocks, or whole file 
 
 identify() {   # identify <file> <component>: sets KEY LABEL STATE SKIP COUNT WANT ORIG CUR
   [ -f "$1" ] || die "missing $1"
-  KEY=; LABEL=; STATE=unknown; STYLE=; EDITKEY=; SWITCH=; CUR=$(sum "$1")
+  KEY=; LABEL=; STATE=unknown; CUR=$(sum "$1")
   case "$2" in
-    finder|topbar) identify_finder "$1" ;;
+    finder)    identify_finder "$1" ;;
     titlebars) identify_theme "$1" ;;
     appkit)    identify_appkit "$1" ;;
     grip)      identify_grip "$1" ;;
     logo)      identify_logo "$1" ;;
   esac
 }
-finder_target() {   # WANT/EDITKEY for FINDER_STYLE (bottom|top|keep) given STYLE found
-  W="${FINDER_STYLE:-keep}"; [ "$W" = keep ] && W="${STYLE:-bottom}"
-  if [ "$W" = top ]; then WANT=$HT; EDITKEY=${KEY}top; else WANT=$HB; EDITKEY=$KEY; fi
-  if [ "$STATE" = patched ] && [ "$STYLE" != "$W" ]; then STATE=oldpatch; SWITCH=$W; fi
-}
 identify_finder() {
-  HB=188e07390cc6c3c814210359ecdd1359; HT=99f7b842b8d030da85e9ff87e4256896
   R=$(region "$1" 9 662)
   case "$R" in
-    f3f611a457c8bff841baff2e3cf78ca6) STATE=original ;;
-    188e07390cc6c3c814210359ecdd1359) STATE=patched; STYLE=bottom ;;
-    99f7b842b8d030da85e9ff87e4256896) STATE=patched; STYLE=top ;;
-    b6a1194a3868172a50d3b80c9cbc2895) STATE=oldpatch; STYLE=bottom ;;
+    f3f611a457c8bff841baff2e3cf78ca6) KEY=finder1039; LABEL='Finder 10.3.9'; STATE=original; SKIP=9; COUNT=662; WANT=8f3ce4d65cf12b5bc9e5931ec4782b70; ORIG=f3f611a457c8bff841baff2e3cf78ca6; return ;;
+    8f3ce4d65cf12b5bc9e5931ec4782b70) KEY=finder1039; LABEL='Finder 10.3.9'; STATE=patched;  SKIP=9; COUNT=662; WANT=8f3ce4d65cf12b5bc9e5931ec4782b70; ORIG=f3f611a457c8bff841baff2e3cf78ca6; return ;;
   esac
-  [ "$STATE" = unknown ] && case "$(region "$1" 3 668)" in
-    43d2b8988616caa9cb1d02cec83c4990) STATE=oldpatch; STYLE=bottom ;;
-    bfc33742ee7998de9da99d420abb1eb0) STATE=oldpatch; STYLE=bottom ;;
-    df02d7ed292a35e280fadba6fb301e2e) STATE=oldpatch; STYLE=bottom ;;
+  R2=$(region "$1" 3 668)
+  case "$R2" in
+    43d2b8988616caa9cb1d02cec83c4990) KEY=finder1039; LABEL='Finder 10.3.9'; STATE=oldpatch; SKIP=9; COUNT=662; WANT=8f3ce4d65cf12b5bc9e5931ec4782b70; ORIG=f3f611a457c8bff841baff2e3cf78ca6; return ;;
   esac
-  if [ "$STATE" != unknown ]; then
-    KEY=finder1039; LABEL='Finder 10.3.9'; SKIP=9; COUNT=662; ORIG=f3f611a457c8bff841baff2e3cf78ca6; finder_target; return
-  fi
+  case "$R" in
+  esac
+  R2=$(region "$1" 3 668)
+  case "$R2" in
+    bfc33742ee7998de9da99d420abb1eb0) KEY=finder1039; LABEL='Finder 10.3.9'; STATE=oldpatch; SKIP=9; COUNT=662; WANT=8f3ce4d65cf12b5bc9e5931ec4782b70; ORIG=f3f611a457c8bff841baff2e3cf78ca6; return ;;
+  esac
+  case "$R" in
+  esac
+  R2=$(region "$1" 3 668)
+  case "$R2" in
+    df02d7ed292a35e280fadba6fb301e2e) KEY=finder1039; LABEL='Finder 10.3.9'; STATE=oldpatch; SKIP=9; COUNT=662; WANT=8f3ce4d65cf12b5bc9e5931ec4782b70; ORIG=f3f611a457c8bff841baff2e3cf78ca6; return ;;
+  esac
+  case "$R" in
+    b6a1194a3868172a50d3b80c9cbc2895) KEY=finder1039; LABEL='Finder 10.3.9'; STATE=oldpatch; SKIP=9; COUNT=662; WANT=8f3ce4d65cf12b5bc9e5931ec4782b70; ORIG=f3f611a457c8bff841baff2e3cf78ca6; return ;;
+    188e07390cc6c3c814210359ecdd1359) KEY=finder1039; LABEL='Finder 10.3.9'; STATE=oldpatch; SKIP=9; COUNT=662; WANT=8f3ce4d65cf12b5bc9e5931ec4782b70; ORIG=f3f611a457c8bff841baff2e3cf78ca6; return ;;
+    99f7b842b8d030da85e9ff87e4256896) KEY=finder1039; LABEL='Finder 10.3.9'; STATE=oldpatch; SKIP=9; COUNT=662; WANT=8f3ce4d65cf12b5bc9e5931ec4782b70; ORIG=f3f611a457c8bff841baff2e3cf78ca6; return ;;
+  esac
 }
 identify_theme() {
   R=$(region "$1" 0 0)
   case "$R" in
-    83b1117d0d7c385255d1f846e69c275f) KEY=theme; LABEL='Panther theme'; STATE=original; SKIP=0; COUNT=0; WANT=5178aa51a495488578c53b6b46ff9540; ORIG=83b1117d0d7c385255d1f846e69c275f; return ;;
-    5178aa51a495488578c53b6b46ff9540) KEY=theme; LABEL='Panther theme'; STATE=patched;  SKIP=0; COUNT=0; WANT=5178aa51a495488578c53b6b46ff9540; ORIG=83b1117d0d7c385255d1f846e69c275f; return ;;
-    606be72eb4b1df32cdc0b497dcdbc050) KEY=theme; LABEL='Panther theme'; STATE=oldpatch; SKIP=0; COUNT=0; WANT=5178aa51a495488578c53b6b46ff9540; ORIG=83b1117d0d7c385255d1f846e69c275f; return ;;
+    83b1117d0d7c385255d1f846e69c275f) KEY=theme; LABEL='Panther theme'; STATE=original; SKIP=0; COUNT=0; WANT=c32910e8d1e97b9401a3044116da0070; ORIG=83b1117d0d7c385255d1f846e69c275f; return ;;
+    c32910e8d1e97b9401a3044116da0070) KEY=theme; LABEL='Panther theme'; STATE=patched;  SKIP=0; COUNT=0; WANT=c32910e8d1e97b9401a3044116da0070; ORIG=83b1117d0d7c385255d1f846e69c275f; return ;;
+    606be72eb4b1df32cdc0b497dcdbc050) KEY=theme; LABEL='Panther theme'; STATE=oldpatch; SKIP=0; COUNT=0; WANT=c32910e8d1e97b9401a3044116da0070; ORIG=83b1117d0d7c385255d1f846e69c275f; return ;;
+    5178aa51a495488578c53b6b46ff9540) KEY=theme; LABEL='Panther theme'; STATE=oldpatch; SKIP=0; COUNT=0; WANT=c32910e8d1e97b9401a3044116da0070; ORIG=83b1117d0d7c385255d1f846e69c275f; return ;;
   esac
 }
 identify_appkit() {
@@ -123,8 +126,9 @@ identify_logo() {
 identify_grip() {
   R=$(region "$1" 0 0)
   case "$R" in
-    662c9a9afaa1f4f8e64fdf6def079772) KEY=finderrsrc; LABEL='Finder divider grip'; STATE=original; SKIP=0; COUNT=0; WANT=f6984330ad8107df5e82101999531d13; ORIG=662c9a9afaa1f4f8e64fdf6def079772; return ;;
-    f6984330ad8107df5e82101999531d13) KEY=finderrsrc; LABEL='Finder divider grip'; STATE=patched;  SKIP=0; COUNT=0; WANT=f6984330ad8107df5e82101999531d13; ORIG=662c9a9afaa1f4f8e64fdf6def079772; return ;;
+    662c9a9afaa1f4f8e64fdf6def079772) KEY=finderrsrc; LABEL='Finder divider grip'; STATE=original; SKIP=0; COUNT=0; WANT=9d51c4fa579a8bc44b6dec738fd729a5; ORIG=662c9a9afaa1f4f8e64fdf6def079772; return ;;
+    9d51c4fa579a8bc44b6dec738fd729a5) KEY=finderrsrc; LABEL='Finder divider grip'; STATE=patched;  SKIP=0; COUNT=0; WANT=9d51c4fa579a8bc44b6dec738fd729a5; ORIG=662c9a9afaa1f4f8e64fdf6def079772; return ;;
+    f6984330ad8107df5e82101999531d13) KEY=finderrsrc; LABEL='Finder divider grip'; STATE=oldpatch; SKIP=0; COUNT=0; WANT=9d51c4fa579a8bc44b6dec738fd729a5; ORIG=662c9a9afaa1f4f8e64fdf6def079772; return ;;
   esac
 }
 LOGO_FILES="${LOGO_FILES:-/System/Library/CoreServices/loginwindow.app/Contents/Resources/MacOSX.tif /System/Library/CoreServices/SecurityAgent.app/Contents/Resources/MacOSXart.tif /System/Library/CoreServices/SecurityAgentPlugins/loginwindow.bundle/Contents/Resources/MacOSXart.tif /System/Library/CoreServices/Finder.app/Contents/Resources/Finder.icns /System/Library/CoreServices/SystemIcons.bundle/Contents/Resources/FinderIcon.icns /System/Library/CoreServices/Dock.app/Contents/Resources/finder.png}"   # each is a separate file; status/install/restore go through all
@@ -132,49 +136,44 @@ LOGO_FILES="${LOGO_FILES:-/System/Library/CoreServices/loginwindow.app/Contents/
 apply_edits() {
   case "$1" in
   finder1039)
-    put 86111 1 '\016'
-    put 136448 4 '\110\027\325\375'
-    put 142092 136 '\110\000\000\204\174\010\002\246\220\001\000\010\224\041\377\240\223\341\000\134\174\177\033\170\300\245\000\004\174\244\204\252\071\041\000\100\174\251\205\252\075\040\000\052\300\051\376\110\300\141\000\104\377\203\050\000\100\236\000\030\354\143\010\052\320\141\000\104\300\201\000\114\354\204\010\050\320\201\000\114\374\100\010\220\110\032\111\111\177\343\373\170\071\041\000\100\174\211\204\252\110\031\367\211\203\341\000\134\070\041\000\140\200\001\000\010\174\010\003\246\116\200\000\040\110\031\356\261\110\000\000\034\110\047\303\200'
-    put 171571 1 '\361'
-    put 171595 1 '\017'
-    put 182006 2 '\377\344'
-    put 278294 1 '\000'
-    put 278351 1 '\000'
-    put 293211 1 '\016'
-    put 293238 2 '\342\024'
-    put 317344 16 '\200\141\000\164\070\201\000\260\070\241\000\320\113\375\123\145'
-    put 448763 1 '\000'
-    put 448790 1 '\000'
-    put 1698498 2 '\377\344'
-    put 1698540 52 '\073\300\000\001\070\000\000\000\220\001\000\240\110\000\000\070\174\010\002\246\220\001\000\010\224\041\377\240\223\341\000\134\113\347\124\251\200\173\000\000\177\244\353\170\177\245\353\170\113\350\100\004'
-    put 2748176 216 '\200\037\001\040\057\200\000\000\101\236\000\264\223\201\000\070\070\141\000\100\113\362\066\345\070\141\000\120\113\362\055\255\200\141\000\120\070\201\000\120\113\362\050\121\250\001\000\124\260\001\000\106\253\236\000\000\250\036\000\004\177\234\000\000\100\234\000\154\250\201\000\106\174\234\040\120\070\204\377\377\057\204\000\016\100\235\000\010\070\200\000\016\074\240\000\052\070\245\377\324\174\005\040\256\120\000\104\056\260\001\000\110\260\001\000\112\260\001\000\114\070\141\000\110\113\362\063\335\263\201\000\120\250\036\000\002\260\001\000\122\070\034\000\001\260\001\000\124\250\036\000\006\260\001\000\126\070\141\000\120\113\362\065\051\073\234\000\001\113\377\377\220\070\141\000\100\113\362\063\251\203\201\000\070\113\330\073\340\070\140\000\064\113\330\073\304\365\370\373\375\375\374\372\367\363\357\351\345\336\331\324\000\077\124\324\325'
-    ;;
-  finder1039top)
     put 81860 4 '\110\001\136\154'
     put 81900 4 '\110\001\136\120'
     put 86111 1 '\016'
     put 128992 4 '\110\000\246\065'
-    put 136448 4 '\110\027\325\375'
-    put 142092 136 '\110\000\000\204\174\010\002\246\220\001\000\010\224\041\377\240\223\341\000\134\174\177\033\170\300\245\000\004\174\244\204\252\071\041\000\100\174\251\205\252\075\040\000\052\300\051\376\110\300\141\000\104\377\203\050\000\100\236\000\030\354\143\010\052\320\141\000\104\300\201\000\114\354\204\010\050\320\201\000\114\374\100\010\220\110\032\111\111\177\343\373\170\071\041\000\100\174\211\204\252\110\031\367\211\203\341\000\134\070\041\000\140\200\001\000\010\174\010\003\246\116\200\000\040\110\031\356\261\110\000\000\034\110\047\303\200'
+    put 136225 3 '\000\026\361'
+    put 136448 4 '\110\000\211\025'
+    put 136500 52 '\355\214\000\050\355\214\000\050\301\141\000\160\321\201\000\174\355\153\150\052\354\000\140\052\321\141\000\160\174\235\204\252\110\032\014\245\200\141\000\104\174\235\204\252\074\340\105\000\201\036\000\000'
+    put 136580 20 '\140\000\000\000\177\343\373\170\200\201\000\104\200\277\000\300\140\000\000\000'
+    put 142092 136 '\110\000\000\204\174\010\002\246\220\001\000\010\224\041\377\240\220\141\000\130\070\141\000\100\177\344\373\170\113\377\303\361\070\141\000\120\110\031\361\251\200\141\000\120\070\201\000\110\110\031\354\115\070\141\000\100\250\201\000\112\250\241\000\110\110\031\354\055\250\201\000\104\070\204\377\377\260\201\000\104\070\140\377\376\070\200\000\040\070\240\000\001\110\032\041\261\110\027\277\220\200\141\000\130\070\041\000\140\200\001\000\010\174\010\003\246\110\031\366\130\101\276\000\044\110\031\356\261\110\000\000\034\110\047\303\200'
     put 171536 92 '\110\000\000\140\174\010\002\246\277\201\377\360\220\001\000\010\174\174\033\170\224\041\377\240\073\340\000\001\113\376\241\234\224\041\377\240\073\340\000\000\113\376\241\220\250\001\000\110\057\237\000\000\101\236\000\044\070\141\000\070\110\031\176\215\200\141\000\070\070\201\000\070\110\031\171\061\250\001\000\110\250\241\000\070\174\000\052\024\113\376\241\210'
     put 182006 2 '\377\310'
     put 245072 4 '\070\200\000\000'
     put 278294 1 '\000'
     put 278351 1 '\000'
+    put 291183 1 '\015'
+    put 291227 1 '\363'
+    put 291723 1 '\015'
+    put 291743 1 '\015'
     put 293060 4 '\140\000\000\000'
     put 293210 2 '\377\377'
     put 293238 2 '\342\024'
+    put 293519 1 '\015'
+    put 293555 1 '\363'
+    put 293919 1 '\015'
+    put 293943 1 '\015'
+    put 294111 1 '\363'
+    put 317116 4 '\113\375\124\125'
     put 317201 3 '\375\307\005'
-    put 317344 16 '\200\141\000\164\070\201\000\260\070\241\000\320\113\375\123\145'
+    put 317356 4 '\140\000\000\000'
     put 448763 1 '\000'
     put 448790 1 '\000'
     put 1698498 2 '\377\310'
-    put 1698540 52 '\073\300\000\001\070\000\000\000\220\001\000\240\110\000\000\070\174\010\002\246\220\001\000\010\224\041\377\240\223\341\000\134\113\350\263\011\200\173\000\000\177\244\353\170\177\245\353\170\113\350\100\004'
+    put 1698540 52 '\073\300\000\001\070\000\000\000\220\001\000\240\110\000\000\070\250\201\000\102\070\204\377\377\260\201\000\102\250\201\000\106\070\204\000\001\260\201\000\106\070\141\000\100\110\002\062\301\113\350\100\124'
     put 2748176 188 '\200\037\001\040\057\200\000\000\101\236\000\250\070\140\000\064\070\200\000\040\070\240\000\001\113\362\135\361\177\303\363\170\113\362\056\251\224\041\377\200\070\141\000\100\113\362\066\315\070\141\000\130\113\362\055\225\200\141\000\130\070\201\000\130\113\362\050\071\070\000\243\243\260\001\000\140\260\001\000\142\260\001\000\144\070\141\000\140\113\362\064\001\250\241\000\130\260\241\000\150\070\005\000\001\260\001\000\154\250\001\000\132\260\001\000\152\250\001\000\136\260\001\000\156\070\141\000\150\113\362\065\111\250\241\000\130\070\245\000\023\260\241\000\150\070\005\000\001\260\001\000\154\070\141\000\150\113\362\065\055\070\141\000\100\113\362\063\265\070\041\000\200\113\330\073\354\070\140\000\064\113\330\073\320\077\124\324\325'
     ;;
   finderrsrc)
-    put 125395 14 '\003\000\000\000\012\010\006\000\000\000\161\047\344\167'
-    put 125493 123 '\116\164\105\130\164\103\157\155\155\145\156\164\000\040\040\040\040\040\040\040\040\040\040\040\040\040\040\040\040\040\040\040\040\040\040\040\040\040\040\040\040\040\040\040\040\040\040\040\040\040\040\040\040\040\040\040\040\040\040\040\040\040\040\040\040\040\040\040\040\040\040\040\040\040\040\040\040\040\040\040\040\040\040\131\016\121\247\000\000\000\030\111\104\101\124\170\332\143\230\067\157\336\177\006\040\230\061\143\306\177\206\201\340\000\000\100\254\070\101\011\032\005\113'
+    put 125395 14 '\017\000\000\010\000\010\000\000\000\000\334\004\066\044'
+    put 125449 167 '\022\164\105\130\164\103\157\155\155\145\156\164\000\040\040\040\040\040\040\040\040\040\040\004\300\303\322\000\000\000\200\111\104\101\124\170\332\355\315\241\012\200\100\024\104\321\307\176\266\301\140\360\013\055\026\233\141\223\101\104\121\027\314\306\005\061\235\151\247\314\115\303\070\315\171\131\367\363\056\345\072\266\024\357\061\063\063\063\063\063\063\063\063\063\063\063\063\063\063\063\063\063\063\063\063\063\063\063\063\063\063\063\063\063\063\063\063\063\063\063\063\063\063\063\063\063\063\063\063\063\063\063\063\063\063\063\063\063\063\063\063\063\063\063\063\063\063\127\270\217\350\376\354\065\021\355\047\177\017\064\252\040\013\323\217\325\041'
     ;;
   theme)
     put 34199 21 '\000\000\000\000\000\000\000\000\000\000\000\000\000\000\000\000\000\000\000\000\000'
@@ -396,6 +395,8 @@ apply_edits() {
     put 1577870 1024 '\375\375\375\377\375\375\375\377\375\375\375\377\375\375\375\377\375\375\375\377\375\375\375\377\375\375\375\377\375\375\375\377\374\374\374\377\375\375\375\377\374\374\374\377\375\375\375\377\375\375\375\377\375\375\375\377\374\374\374\377\370\370\370\377\361\361\361\377\356\356\356\377\356\356\356\377\356\356\356\377\355\355\355\377\356\356\356\377\356\356\356\377\356\356\356\377\357\357\357\377\355\355\355\377\356\356\356\377\356\356\356\377\356\356\356\377\356\356\356\377\356\356\356\377\356\356\356\377\356\356\356\377\356\356\356\377\355\355\355\377\362\362\362\377\370\370\370\377\374\374\374\377\373\373\373\377\363\363\363\377\355\355\355\377\345\345\345\377\345\345\345\377\346\346\346\377\346\346\346\377\346\346\346\377\346\346\346\377\346\346\346\377\346\346\346\377\346\346\346\377\346\346\346\377\346\346\346\377\345\345\345\377\346\346\346\377\346\346\346\377\346\346\346\377\346\346\346\377\346\346\346\377\345\345\345\377\355\355\355\377\364\364\364\377\373\373\373\377\372\372\372\377\365\365\365\377\356\356\356\377\354\354\354\377\354\354\354\377\353\353\353\377\353\353\353\377\354\354\354\377\354\354\354\377\353\353\353\377\353\353\353\377\353\353\353\377\353\353\353\377\353\353\353\377\353\353\353\377\353\353\353\377\353\353\353\377\353\353\353\377\354\354\354\377\353\353\353\377\353\353\353\377\356\356\356\377\366\366\366\377\371\371\371\377\367\367\367\377\370\370\370\377\370\370\370\377\370\370\370\377\370\370\370\377\370\370\370\377\370\370\370\377\370\370\370\377\370\370\370\377\370\370\370\377\367\367\367\377\370\370\370\377\370\370\370\377\370\370\370\377\367\367\367\377\370\370\370\377\370\370\370\377\370\370\370\377\370\370\370\377\367\367\367\377\371\371\371\377\367\367\367\377\367\367\367\377\370\370\370\377\366\366\366\377\362\362\362\377\353\353\353\377\350\350\350\377\350\350\350\377\350\350\350\377\350\350\350\377\350\350\350\377\350\350\350\377\350\350\350\377\350\350\350\377\350\350\350\377\350\350\350\377\350\350\350\377\350\350\350\377\350\350\350\377\350\350\350\377\350\350\350\377\350\350\350\377\350\350\350\377\350\350\350\377\354\354\354\377\362\362\362\377\366\366\366\377\364\364\364\377\355\355\355\377\347\347\347\377\340\340\340\377\340\340\340\377\341\341\341\377\337\337\337\377\340\340\340\377\340\340\340\377\340\340\340\377\341\341\341\377\340\340\340\377\337\337\337\377\340\340\340\377\337\337\337\377\337\337\337\377\337\337\337\377\340\340\340\377\340\340\340\377\340\340\340\377\341\341\341\377\347\347\347\377\354\354\354\377\364\364\364\377\362\362\362\377\356\356\356\377\347\347\347\377\345\345\345\377\345\345\345\377\345\345\345\377\345\345\345\377\345\345\345\377\345\345\345\377\345\345\345\377\345\345\345\377\345\345\345\377\344\344\344\377\345\345\345\377\345\345\345\377\345\345\345\377\345\345\345\377\344\344\344\377\345\345\345\377\345\345\345\377\345\345\345\377\350\350\350\377\355\355\355\377\362\362\362\377\360\360\360\377\357\357\357\377\361\361\361\377\360\360\360\377\360\360\360\377\360\360\360\377\357\357\357\377\360\360\360\377\360\360\360\377\360\360\360\377\360\360\360\377\360\360\360\377\360\360\360\377\357\357\357\377\360\360\360\377\357\357\357\377\360\360\360\377\357\357\357\377\360\360\360\377\357\357\357\377\360\360\360\377\360\360\360\377\360\360\360\377\360\360\360\377\356\356\356\377\351\351\351\377\344\344\344\377\340\340\340\377\341\341\341\377\340\340\340\377\342\342\342\377\341\341\341\377\341\341\341\377\340\340\340\377\342\342\342\377\341\341\341\377\341\341\341\377\341\341\341\377\342\342\342\377\341\341\341\377\342\342\342\377\341\341\341\377\341\341\341\377\341\341\341\377\341\341\341\377\344\344\344\377\351\351\351\377\355\355\355\377\354\354\354\377\346\346\346\377\340\340\340\377\331\331\331\377\331\331\331\377\331\331\331\377\331\331\331\377\331\331\331\377\331\331\331\377\331\331\331\377\331\331\331\377\330\330\330\377\330\330\330\377\331\331\331\377\331\331\331\377\331\331\331\377\331\331\331\377\331\331\331\377\331\331\331\377\331\331\331\377\331\331\331\377\336\336\336\377\346\346\346\377\354\354\354\377\353\353\353\377\346\346\346\377'
     put 1578894 183 '\342\342\342\377\336\336\336\377\335\335\335\377\335\335\335\377\335\335\335\377\335\335\335\377\336\336\336\377\336\336\336\377\336\336\336\377\335\335\335\377\336\336\336\377\336\336\336\377\336\336\336\377\335\335\335\377\336\336\336\377\336\336\336\377\335\335\335\377\335\335\335\377\335\335\335\377\341\341\341\377\347\347\347\377\352\352\352\377\177\177\177\377\177\177\177\377\177\177\177\377\177\177\177\377\177\177\177\377\177\177\177\377\177\177\177\377\177\177\177\377\177\177\177\377\177\177\177\377\177\177\177\377\177\177\177\377\177\177\177\377\177\177\177\377\177\177\177\377\177\177\177\377\177\177\177\377\177\177\177\377\177\177\177\377\177\177\177\377\177\177\177\377\177\177\177\377\177\177\177\377\177\177\177'
     put 2277210 255 '\372\372\372\377\372\372\372\377\372\372\372\377\372\372\372\377\372\372\372\377\372\372\372\377\372\372\372\377\372\372\372\377\377\377\377\377\377\377\377\377\377\377\377\377\377\377\377\377\377\377\377\377\377\377\377\377\377\377\377\377\377\377\377\377\372\372\372\377\372\372\372\377\372\372\372\377\372\372\372\377\372\372\372\377\372\372\372\377\372\372\372\377\372\372\372\377\351\351\351\377\351\351\351\377\351\351\351\377\351\351\351\377\351\351\351\377\351\351\351\377\351\351\351\377\351\351\351\377\372\372\372\377\372\372\372\377\372\372\372\377\372\372\372\377\372\372\372\377\372\372\372\377\372\372\372\377\372\372\372\377\377\377\377\377\377\377\377\377\377\377\377\377\377\377\377\377\377\377\377\377\377\377\377\377\377\377\377\377\377\377\377\377\372\372\372\377\372\372\372\377\372\372\372\377\372\372\372\377\372\372\372\377\372\372\372\377\372\372\372\377\372\372\372\377\351\351\351\377\351\351\351\377\351\351\351\377\351\351\351\377\351\351\351\377\351\351\351\377\351\351\351\377\351\351\351'
+    put 2794234 64 '\125\125\125\125\252\252\252\252\377\377\377\377\252\252\252\252\125\125\125\125\252\252\252\252\377\377\377\377\252\252\252\252\125\125\125\125\252\252\252\252\377\377\377\377\252\252\252\252\125\125\125\125\252\252\252\252\377\377\377\377\252\252\252\252'
+    put 2794316 14 '\351\351\351\351\351\351\000\002\372\372\372\372\372\372'
     ;;
   appkit1039)
     put 602984 2 '\110\000'
@@ -667,8 +668,7 @@ install_one() {   # install_one <file> <name>
     oldpatch)
       # patched by an older Aquafinder: re-patch starting from the saved original
       find_backup "$F" || { echo "$2: patched by an older Aquafinder, but its original backup is missing; skipped."; return 1; }
-      SRC="$BK"; HOW="updated from an older Aquafinder"
-      [ -n "$SWITCH" ] && HOW="status bar moved to the $SWITCH" ;;
+      SRC="$BK"; HOW="updated from an older Aquafinder" ;;
     original)
       mkdir -p "$BACKUP_DIR" || die "cannot create $BACKUP_DIR"
       BK="$BACKUP_DIR/${F##*/}-$KEY.orig"
@@ -679,7 +679,7 @@ install_one() {   # install_one <file> <name>
   esac
   swap_in "$F" "$F"                                 # copy keeps owner and mode
   [ "$SRC" = "$F" ] || cat "$SRC" > "$TMP" || die "cannot copy $SRC"
-  apply_edits "${EDITKEY:-$KEY}"
+  apply_edits "$KEY"
   [ "$(region "$TMP" $SKIP $COUNT)" = "$WANT" ] || die "$2: patched copy failed verification; nothing changed."
   mv -f "$TMP" "$F" || die "could not replace $F"; TMP=
   echo "$2: $HOW ($LABEL). Backup: $BK"
@@ -703,7 +703,7 @@ status_one() {
   identify "$1" "$2"
   case "$STATE" in
     original) echo "$2: original ($LABEL)" ;;
-    patched)  echo "$2: Aquafinder installed ($LABEL${STYLE:+, $STYLE status bar})" ;;
+    patched)  echo "$2: Aquafinder installed ($LABEL)" ;;
     oldpatch) echo "$2: older Aquafinder installed ($LABEL); run install to update" ;;
     *)        echo "$2: not recognised (md5 $CUR)" ;;
   esac
@@ -714,28 +714,9 @@ need_root() {
   [ "$(id -u)" = 0 ] || die "run with sudo: sudo sh $0 $*"
 }
 
-topbar_off() {   # restore topbar: a top-bar Finder goes back to the bottom bar
-  identify "$FINDER" finder
-  case "$STATE" in
-    original|unknown) echo "topbar: off (the Aqua Finder isn't installed)."; return 0 ;;
-  esac
-  [ "$STYLE" = top ] || { echo "topbar: already off ($LABEL)."; return 0; }
-  FINDER_STYLE=bottom; install_one "$FINDER" topbar; R=$?; FINDER_STYLE=; return $R
-}
-
-status_topbar() {   # one line for the option: installed = status bar at the top
-  identify "$FINDER" finder
-  case "$STATE" in
-    unknown) echo "topbar: not recognised (md5 $CUR)" ;;
-    original) echo "topbar: original (Aqua Finder not installed)" ;;
-    *) if [ "$STYLE" = top ]; then echo "topbar: Aquafinder installed (status bar under the toolbar)"
-       else echo "topbar: original (status bar at the bottom)"; fi ;;
-  esac
-}
-
 finish() {
   [ -n "$NO_RESTART" ] && return 0
-  case "$CHANGED" in *finder*|*topbar*|*grip*)
+  case "$CHANGED" in *finder*|*grip*)
     # no killall without the optional BSD Subsystem; ps is in /bin
     for P in $(ps -axc | awk '$NF == "Finder" {print $1}'); do kill "$P" 2>/dev/null; done
     echo "Finder restarted." ;;
@@ -754,31 +735,28 @@ finish() {
 }
 
 WHAT="${2:-all}"
-case "$WHAT" in finder|topbar|titlebars|logo|all) ;; *) echo "unknown component: $WHAT"; exit 1 ;; esac
+case "$WHAT" in finder|titlebars|logo|all) ;; *) echo "unknown component: $WHAT"; exit 1 ;; esac
 want() { [ "$WHAT" = all ] || [ "$WHAT" = "$1" ]; }
 CHANGED=; RC=0
 case "$1" in
   install)
     need_root install
     want finder    && { install_one "$FINDER" finder || RC=1; install_one "$GRIP" grip || RC=1; }
-    [ "$WHAT" = topbar ] && { FINDER_STYLE=top; install_one "$FINDER" topbar || RC=1; FINDER_STYLE=; }
     want titlebars && { install_one "$THEME" titlebars || RC=1; install_one "$APPKIT" appkit || RC=1; }
     want logo      && for F in $LOGO_FILES; do install_one "$F" logo || RC=1; done
     finish ;;
   restore|uninstall)
     need_root restore
     want finder    && { restore_one "$FINDER" finder || RC=1; restore_one "$GRIP" grip || RC=1; }
-    [ "$WHAT" = topbar ] && { topbar_off || RC=1; }
     want titlebars && { restore_one "$THEME" titlebars || RC=1; restore_one "$APPKIT" appkit || RC=1; }
     want logo      && for F in $LOGO_FILES; do restore_one "$F" logo || RC=1; done
     finish ;;
   status|"")
     status_one "$FINDER" finder
     status_one "$GRIP" grip
-    status_topbar
     status_one "$THEME" titlebars
     status_one "$APPKIT" appkit
     for F in $LOGO_FILES; do status_one "$F" logo; done ;;
-  *) echo "usage: sudo sh $0 [status|install|restore] [finder|topbar|titlebars|logo]"; exit 1 ;;
+  *) echo "usage: sudo sh $0 [status|install|restore] [finder|titlebars|logo]"; exit 1 ;;
 esac
 exit $RC

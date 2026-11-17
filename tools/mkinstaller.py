@@ -1,8 +1,8 @@
 """Generate dist/aquafinder.sh: a self-contained Panther shell script that
 installs/restores independent components on an iBook:
 
-  finder     Aqua (non-brushed-metal) Finder windows with toolbar + sidebar
-  topbar     option for finder: its status bar under the toolbar (Jaguar)
+  finder     Aqua (non-brushed-metal) Finder windows with toolbar + sidebar,
+             and the status bar under the toolbar (Jaguar)
   titlebars  Jaguar's pinstriped, translucent title bars (theme Extras.rsrc,
              plus AppKit so Cocoa windows can show the translucency)
   logo       Jaguar branding: the Garamond "Mac OS X" wordmark in About This
@@ -68,7 +68,7 @@ def text_region(path, a, b):
     """4 KiB-aligned block span covering __TEXT from its first section on.
     update_prebinding rewrites the header/load commands and __DATA pointers
     but never the code, so this identifies a Finder build however often it
-    has been re-prebound -- and it covers the gradient routine that lives in
+    has been re-prebound -- and it covers the bar routine that lives in
     __TEXT's tail padding. It starts at the first whole block after the
     first section's start, not after the load commands: re-prebinding
     against newer dylibs (QuickTime 7.5 pulls in Accelerate, AudioToolbox...)
@@ -86,10 +86,6 @@ def text_region(path, a, b):
     return skip, count, md5(a[lo:hi]), md5(b[lo:hi])
 
 entries = []   # (component, key, label, skip, count, orig md5, patched md5, edit lines)
-# The Finder comes in two styles: the bottom bar (default) and, with the
-# optional 'topbar' set, the status bar under the toolbar. Both share one key
-# (so one backup); the top-bar edits are listed under <key>top.
-finder_builds = []   # (key, label, skip, count, orig, bottom md5, top md5)
 for ver, rel in FINDER_BUILDS:
     src = os.path.join(ROOT, rel)
     key, lbl = 'finder' + ver.replace('.', ''), 'Finder ' + ver
@@ -99,26 +95,22 @@ for ver, rel in FINDER_BUILDS:
     b = open(out, 'rb').read()
     skip, count, mo, mp = text_region(src, a, b)
     entries.append(('finder', key, lbl, skip, count, mo, mp, edit_lines(a, b)))
-    out = os.path.join(ROOT, 'build', 'Finder-%s-topbar' % ver)
-    patch.apply(src, out, patch.SET_NAMES + ['topbar'], quiet=True)
-    b = open(out, 'rb').read()
-    sk2, cn2, mo2, mt = text_region(src, a, b)
-    assert (sk2, cn2) == (skip, count)
-    entries.append(('finder', key + 'top', lbl + ', top status bar', skip, count, mo, mt, edit_lines(a, b)))
-    finder_builds.append((key, lbl, skip, count, mo, mp, mt))
 
-# The Finder's resources: the sidebar divider's grip, Jaguar's splitter ridges
-# instead of the metal dimple (installed and restored with the Finder).
+# The Finder's resources: the sidebar divider's image, the column view's
+# divider instead of the metal dimple (installed and restored with the Finder).
 a = open(os.path.join(ROOT, GRIP_SRC), 'rb').read()
-b = grip.build(a, os.path.join(ROOT, JAGUAR_SRC))
+b = grip.build(a)
 entries.append(('grip', 'finderrsrc', 'Finder divider grip', 0, 0, md5(a), md5(b), edit_lines(a, b)))
 
 theme_out = os.path.join(ROOT, 'build', 'Extras-jaguarbars.rsrc')
 import contextlib, io
 with contextlib.redirect_stdout(io.StringIO()):
     theme.transplant(os.path.join(ROOT, THEME_SRC), os.path.join(ROOT, JAGUAR_SRC), theme_out, THEME_IDS)
-    # loading spinner art 16 -> 13 px, so it fits the 15 px bottom bar
+    # loading spinner art 16 -> 13 px (it was sized for the 15 px bottom bar)
     theme.shrink_frames(theme_out, theme_out, 390, 13, 2)
+    # toolbar background brush -> Jaguar's pinstripes, as the toolbar art above
+    # (the Finder erases the status bar with it)
+    theme.jaguar_toolbar_brush(theme_out, theme_out)
 a, b = open(os.path.join(ROOT, THEME_SRC), 'rb').read(), open(theme_out, 'rb').read()
 entries.append(('titlebars', 'theme', 'Panther theme', 0, 0, md5(a), md5(b), edit_lines(a, b)))
 
@@ -158,7 +150,7 @@ def ident_block(comp):
         out.append("    %s) KEY=%s; LABEL='%s'; STATE=original; SKIP=%d; COUNT=%d; WANT=%s; ORIG=%s; return ;;" % (o, key, lbl, skip, count, n, o))
         out.append("    %s) KEY=%s; LABEL='%s'; STATE=patched;  SKIP=%d; COUNT=%d; WANT=%s; ORIG=%s; return ;;" % (n, key, lbl, skip, count, n, o))
         for k, sk, cn, h in released:
-            if k == key and h != n:
+            if k in (key, key + 'top') and h != n:
                 if (sk, cn) != (skip, count):   # an old release hashed a different span
                     out.append('  esac')
                     out.append('  R2=$(region "$1" %d %d)' % (sk, cn))
@@ -169,36 +161,7 @@ def ident_block(comp):
                     out.append('  case "$R" in')
         out.append('  esac')
     return '\n'.join(out)
-def finder_ident():
-    """identify_finder: STYLE = the style found (bottom/top), STATE as usual;
-    then finder_target picks WANT/EDITKEY for FINDER_STYLE (keep = the style
-    found, bottom for an original Finder). A Finder patched in the other style
-    counts as oldpatch, so install re-patches it from the backup."""
-    out = []
-    for key, lbl, skip, count, o, hb, ht in finder_builds:
-        spans = {}   # (skip, count) -> [(md5, style)]
-        for k, sk, cn, h in released:
-            if k in (key, key + 'top') and h not in (hb, ht):
-                spans.setdefault((sk, cn), []).append((h, 'top' if k.endswith('top') else 'bottom'))
-        out.append('  HB=%s; HT=%s' % (hb, ht))
-        out.append('  R=$(region "$1" %d %d)' % (skip, count))
-        out.append('  case "$R" in')
-        out.append('    %s) STATE=original ;;' % o)
-        out.append('    %s) STATE=patched; STYLE=bottom ;;' % hb)
-        out.append('    %s) STATE=patched; STYLE=top ;;' % ht)
-        for h, st in spans.pop((skip, count), []):
-            out.append('    %s) STATE=oldpatch; STYLE=%s ;;' % (h, st))
-        out.append('  esac')
-        for (sk, cn), hs in spans.items():   # older releases hashed a different span
-            out.append('  [ "$STATE" = unknown ] && case "$(region "$1" %d %d)" in' % (sk, cn))
-            for h, st in hs:
-                out.append('    %s) STATE=oldpatch; STYLE=%s ;;' % (h, st))
-            out.append('  esac')
-        out.append('  if [ "$STATE" != unknown ]; then')
-        out.append("    KEY=%s; LABEL='%s'; SKIP=%d; COUNT=%d; ORIG=%s; finder_target; return" % (key, lbl, skip, count, o))
-        out.append('  fi')
-    return '\n'.join(out)
-known_finder = finder_ident()
+known_finder = ident_block('finder')
 known_theme, known_appkit = ident_block('titlebars'), ident_block('appkit')
 known_logo = ident_block('logo')
 known_grip = ident_block('grip')
@@ -210,10 +173,9 @@ script = r'''#!/bin/sh
 # Aquafinder for Mac OS X 10.3.9 (Panther).
 #
 #   finder     Aqua (non-brushed-metal) Finder windows that keep toolbar + sidebar,
-#              a Jaguar-style soft shadow for the bottom bar and softer pane borders
-#              (plus the Finder's resources: Jaguar's ridges as the sidebar grip)
-#   topbar     option for finder: the status bar under the toolbar, as in Jaguar,
-#              instead of at the bottom (restore topbar puts it back at the bottom)
+#              the status bar under the toolbar as in Jaguar, and a sidebar divider
+#              drawn like the column view's (plus the Finder's resources: the
+#              divider's image)
 #   titlebars  Jaguar-style pinstriped, translucent window title bars
 #              (the HIToolbox theme, plus AppKit so Cocoa windows blend too)
 #
@@ -221,10 +183,8 @@ script = r'''#!/bin/sh
 #   logo       Jaguar branding: Garamond "Mac OS X" in About This Mac and the
 #              login panel, and Jaguar's Finder icon in the Finder and Dock
 #
-#   sudo sh aquafinder.sh install [finder|topbar|titlebars|logo]   (default: all)
-#   sudo sh aquafinder.sh restore [finder|topbar|titlebars|logo]   (default: all)
-#
-# install finder (and install all) keeps the Finder's current status bar style.
+#   sudo sh aquafinder.sh install [finder|titlebars|logo]   (default: all)
+#   sudo sh aquafinder.sh restore [finder|titlebars|logo]   (default: all)
 #
 # Only recognised files are touched (the Finder is identified by its code
 # section, so re-prebinding by Software Update doesn't matter). Each is backed up, patched
@@ -256,19 +216,14 @@ region() {   # region <file> <skip> <count>: md5 of 4 KiB blocks, or whole file 
 
 identify() {   # identify <file> <component>: sets KEY LABEL STATE SKIP COUNT WANT ORIG CUR
   [ -f "$1" ] || die "missing $1"
-  KEY=; LABEL=; STATE=unknown; STYLE=; EDITKEY=; SWITCH=; CUR=$(sum "$1")
+  KEY=; LABEL=; STATE=unknown; CUR=$(sum "$1")
   case "$2" in
-    finder|topbar) identify_finder "$1" ;;
+    finder)    identify_finder "$1" ;;
     titlebars) identify_theme "$1" ;;
     appkit)    identify_appkit "$1" ;;
     grip)      identify_grip "$1" ;;
     logo)      identify_logo "$1" ;;
   esac
-}
-finder_target() {   # WANT/EDITKEY for FINDER_STYLE (bottom|top|keep) given STYLE found
-  W="${FINDER_STYLE:-keep}"; [ "$W" = keep ] && W="${STYLE:-bottom}"
-  if [ "$W" = top ]; then WANT=$HT; EDITKEY=${KEY}top; else WANT=$HB; EDITKEY=$KEY; fi
-  if [ "$STATE" = patched ] && [ "$STYLE" != "$W" ]; then STATE=oldpatch; SWITCH=$W; fi
 }
 identify_finder() {
 __KNOWN_FINDER__
@@ -313,8 +268,7 @@ install_one() {   # install_one <file> <name>
     oldpatch)
       # patched by an older Aquafinder: re-patch starting from the saved original
       find_backup "$F" || { echo "$2: patched by an older Aquafinder, but its original backup is missing; skipped."; return 1; }
-      SRC="$BK"; HOW="updated from an older Aquafinder"
-      [ -n "$SWITCH" ] && HOW="status bar moved to the $SWITCH" ;;
+      SRC="$BK"; HOW="updated from an older Aquafinder" ;;
     original)
       mkdir -p "$BACKUP_DIR" || die "cannot create $BACKUP_DIR"
       BK="$BACKUP_DIR/${F##*/}-$KEY.orig"
@@ -325,7 +279,7 @@ install_one() {   # install_one <file> <name>
   esac
   swap_in "$F" "$F"                                 # copy keeps owner and mode
   [ "$SRC" = "$F" ] || cat "$SRC" > "$TMP" || die "cannot copy $SRC"
-  apply_edits "${EDITKEY:-$KEY}"
+  apply_edits "$KEY"
   [ "$(region "$TMP" $SKIP $COUNT)" = "$WANT" ] || die "$2: patched copy failed verification; nothing changed."
   mv -f "$TMP" "$F" || die "could not replace $F"; TMP=
   echo "$2: $HOW ($LABEL). Backup: $BK"
@@ -349,7 +303,7 @@ status_one() {
   identify "$1" "$2"
   case "$STATE" in
     original) echo "$2: original ($LABEL)" ;;
-    patched)  echo "$2: Aquafinder installed ($LABEL${STYLE:+, $STYLE status bar})" ;;
+    patched)  echo "$2: Aquafinder installed ($LABEL)" ;;
     oldpatch) echo "$2: older Aquafinder installed ($LABEL); run install to update" ;;
     *)        echo "$2: not recognised (md5 $CUR)" ;;
   esac
@@ -360,28 +314,9 @@ need_root() {
   [ "$(id -u)" = 0 ] || die "run with sudo: sudo sh $0 $*"
 }
 
-topbar_off() {   # restore topbar: a top-bar Finder goes back to the bottom bar
-  identify "$FINDER" finder
-  case "$STATE" in
-    original|unknown) echo "topbar: off (the Aqua Finder isn't installed)."; return 0 ;;
-  esac
-  [ "$STYLE" = top ] || { echo "topbar: already off ($LABEL)."; return 0; }
-  FINDER_STYLE=bottom; install_one "$FINDER" topbar; R=$?; FINDER_STYLE=; return $R
-}
-
-status_topbar() {   # one line for the option: installed = status bar at the top
-  identify "$FINDER" finder
-  case "$STATE" in
-    unknown) echo "topbar: not recognised (md5 $CUR)" ;;
-    original) echo "topbar: original (Aqua Finder not installed)" ;;
-    *) if [ "$STYLE" = top ]; then echo "topbar: Aquafinder installed (status bar under the toolbar)"
-       else echo "topbar: original (status bar at the bottom)"; fi ;;
-  esac
-}
-
 finish() {
   [ -n "$NO_RESTART" ] && return 0
-  case "$CHANGED" in *finder*|*topbar*|*grip*)
+  case "$CHANGED" in *finder*|*grip*)
     # no killall without the optional BSD Subsystem; ps is in /bin
     for P in $(ps -axc | awk '$NF == "Finder" {print $1}'); do kill "$P" 2>/dev/null; done
     echo "Finder restarted." ;;
@@ -400,32 +335,29 @@ finish() {
 }
 
 WHAT="${2:-all}"
-case "$WHAT" in finder|topbar|titlebars|logo|all) ;; *) echo "unknown component: $WHAT"; exit 1 ;; esac
+case "$WHAT" in finder|titlebars|logo|all) ;; *) echo "unknown component: $WHAT"; exit 1 ;; esac
 want() { [ "$WHAT" = all ] || [ "$WHAT" = "$1" ]; }
 CHANGED=; RC=0
 case "$1" in
   install)
     need_root install
     want finder    && { install_one "$FINDER" finder || RC=1; install_one "$GRIP" grip || RC=1; }
-    [ "$WHAT" = topbar ] && { FINDER_STYLE=top; install_one "$FINDER" topbar || RC=1; FINDER_STYLE=; }
     want titlebars && { install_one "$THEME" titlebars || RC=1; install_one "$APPKIT" appkit || RC=1; }
     want logo      && for F in $LOGO_FILES; do install_one "$F" logo || RC=1; done
     finish ;;
   restore|uninstall)
     need_root restore
     want finder    && { restore_one "$FINDER" finder || RC=1; restore_one "$GRIP" grip || RC=1; }
-    [ "$WHAT" = topbar ] && { topbar_off || RC=1; }
     want titlebars && { restore_one "$THEME" titlebars || RC=1; restore_one "$APPKIT" appkit || RC=1; }
     want logo      && for F in $LOGO_FILES; do restore_one "$F" logo || RC=1; done
     finish ;;
   status|"")
     status_one "$FINDER" finder
     status_one "$GRIP" grip
-    status_topbar
     status_one "$THEME" titlebars
     status_one "$APPKIT" appkit
     for F in $LOGO_FILES; do status_one "$F" logo; done ;;
-  *) echo "usage: sudo sh $0 [status|install|restore] [finder|topbar|titlebars|logo]"; exit 1 ;;
+  *) echo "usage: sudo sh $0 [status|install|restore] [finder|titlebars|logo]"; exit 1 ;;
 esac
 exit $RC
 '''
