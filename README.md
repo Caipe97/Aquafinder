@@ -18,8 +18,6 @@ Make Mac OS X 10.3.9 Panther look and fit better on small screens, like 800×600
 - A smaller loading spinner (13 px). It comes from the system theme, so it's installed with the
   title bars and every spinner in the system gets the same size.
 
-![Status bar under the toolbar](screens/topbar.png)
-
 **Title bars**
 - Pinstriped title bars from Jaguar (10.2) in every app.
 - Inactive windows get see-through title bars, in both Carbon apps (like the Finder) and Cocoa apps (like TextEdit).
