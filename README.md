@@ -80,9 +80,7 @@ Then restart. The original files are kept in `/Library/Aquafinder/`.
 - Only works on **Mac OS X 10.3.9**. On anything else the script does nothing.
 - The script checks every file before it changes it, keeps a backup, and checks the result.
 - It needs nothing beyond a standard Panther install.
-- Tested in QEMU, including with Quartz Extreme on an emulated Radeon 9000:
-
-  ![Finder with Quartz Extreme](screens/10-qe-finder.png)
+- Tested in QEMU, including with Quartz Extreme on an emulated Radeon 9000.
 
 ## More screenshots
 
