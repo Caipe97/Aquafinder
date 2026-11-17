@@ -22,15 +22,20 @@ typedef struct {
     const char *prefixes;      /* space-separated status line prefixes */
     const char *title, *desc;
     BOOL restart;              /* needs a restart to show everywhere */
+    int parent;                /* option of PARTS[parent], or -1 */
 } Part;
 
+/* An option row comes right after its parent, so Apply runs the parent's
+ * install/restore first. */
 static const Part PARTS[] = {
     { "finder", "finder", "Aqua Finder windows",
-      "Plain Aqua instead of brushed metal, a slim 15 px bottom bar with a soft shadow, and lighter pane lines.", NO },
+      "Plain Aqua instead of brushed metal, a slim 15 px bottom bar with a soft shadow, and lighter pane lines.", NO, -1 },
+    { "topbar", "topbar", "Status bar under the toolbar",
+      "As in Jaguar: the item count sits under the toolbar, and the files run to the bottom of the window.", NO, 0 },
     { "titlebars", "titlebars appkit", "Jaguar title bars",
-      "Pinstriped title bars from 10.2 in every app, see-through when inactive, and a smaller loading spinner. Needs a restart.", YES },
+      "Pinstriped title bars from 10.2 in every app, see-through when inactive, and a smaller loading spinner. Needs a restart.", YES, -1 },
     { "logo", "logo", "Jaguar logo and Finder icon",
-      "The Garamond \"Mac OS X\" in About This Mac and the login panel, and Jaguar's Finder icon in the Finder and the Dock.", NO },
+      "The Garamond \"Mac OS X\" in About This Mac and the login panel, and Jaguar's Finder icon in the Finder and the Dock.", NO, -1 },
 };
 #define NPARTS ((int)(sizeof PARTS / sizeof PARTS[0]))
 #define S(c) [NSString stringWithCString:(c)]
@@ -98,15 +103,16 @@ static int combine(int acc, int st, BOOL first)
 
     y = h - 84;
     for (i = 0; i < NPARTS; i++, y -= rowH) {
-        NSButton *b = [[[NSButton alloc] initWithFrame:NSMakeRect(18, y, 400, 20)] autorelease];
+        float x = PARTS[i].parent < 0 ? 18 : 38;   /* options sit under their part */
+        NSButton *b = [[[NSButton alloc] initWithFrame:NSMakeRect(x, y, 418 - x, 20)] autorelease];
         [b setButtonType:NSSwitchButton];
         [b setTitle:S(PARTS[i].title)];
-        [b setFont:[NSFont boldSystemFontOfSize:13]];
+        [b setFont:PARTS[i].parent < 0 ? [NSFont boldSystemFontOfSize:13] : [NSFont systemFontOfSize:13]];
         [b setTarget:self]; [b setAction:@selector(changed:)];
         [[window contentView] addSubview:b];
         box[i] = b;
-        [self label:S(PARTS[i].desc) frame:NSMakeRect(38, y - 34, 380, 30) gray:NO];
-        status[i] = [self label:@"" frame:NSMakeRect(38, y - 52, 380, 16) gray:YES];
+        [self label:S(PARTS[i].desc) frame:NSMakeRect(x + 20, y - 34, 400 - x, 30) gray:NO];
+        status[i] = [self label:@"" frame:NSMakeRect(x + 20, y - 52, 400 - x, 16) gray:YES];
     }
 
     NSBox *line = [[[NSBox alloc] initWithFrame:NSMakeRect(20, 62, 400, 1)] autorelease];
@@ -181,6 +187,8 @@ static int combine(int acc, int st, BOOL first)
         [box[i] setEnabled:(st != ST_UNKNOWN)];
         [box[i] setState:(st == ST_INSTALLED || st == ST_OLD || st == ST_MIXED) ? NSOnState : NSOffState];
         [status[i] setStringValue:[self describe:st]];
+        if (PARTS[i].parent >= 0 && st != ST_UNKNOWN)   /* an option: on or off, not "installed" */
+            [status[i] setStringValue:st == ST_INSTALLED ? @"Currently: on." : @"Currently: off."];
     }
     [self changed:nil];
 }
@@ -197,6 +205,14 @@ static int combine(int acc, int st, BOOL first)
 {
     BOOL any = NO;
     int i;
+    /* An option needs its part: ticking it ticks the part, unticking the
+     * part unticks it. */
+    for (i = 0; i < NPARTS; i++) {
+        int p = PARTS[i].parent;
+        if (p < 0) continue;
+        if (sender == box[i] && [box[i] state] == NSOnState && [box[p] isEnabled]) [box[p] setState:NSOnState];
+        if ([box[p] state] == NSOffState) [box[i] setState:NSOffState];
+    }
     for (i = 0; i < NPARTS; i++) if ([self verbFor:i]) any = YES;
     [applyButton setEnabled:any];
     if (sender != nil) [footer setStringValue:any ? @"" : @"Nothing to change."];

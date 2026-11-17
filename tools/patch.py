@@ -6,7 +6,8 @@ copies -- re-prebound ones, and other builds such as 10.3.4 whose code has
 moved -- are matched by masked instruction signatures, which
 update_prebinding never changes; every site must match exactly once.
 
-usage: patch.py <in-finder> <out-finder> [set,set,...]   (default: all sets)
+usage: patch.py <in-finder> <out-finder> [set,set,...]   (default: SET_NAMES)
+Optional sets (OPTIONAL_SETS) are applied only when named, e.g. add 'topbar'.
 """
 import sys, struct
 sys.path.insert(0, __file__.rsplit('/', 1)[0])
@@ -70,9 +71,27 @@ PATCHES = [
     # handle below it (as in Aqua windows). r28 = 1 when the bar is at the
     # bottom, 0 otherwise; the width is never negative, so no sign extension.
     ('slimbar', 0x48974, 0x7c840734, 0x7c84e214, 'window layout: content width -> width + (bar at bottom)'),
+    # Optional: the status bar under the toolbar, as in Jaguar, instead of at
+    # the bottom. Browser windows use the top status bar that windows without
+    # a toolbar already have (20 rows, full width); the panes start below it
+    # and run to the window bottom, where the resize handle sits in the list's
+    # scroll bar corner as in any Aqua window. The 'shadow' hook then runs
+    # cave.build_topbar instead of the gradient: Aqua erase plus Jaguar's
+    # 1px lines above and below the bar. Needs 'shadow' and 'slimbar'.
+    ('topbar', 0x2ae10, 0x419e0060, ('always',), 'status bar rect: beq bottom rect -> b top rect'),
+    ('topbar', 0x488c4, 0x409e0014, 0x60000000, 'window layout: top offset for the bar in browser windows too'),
+    # replaces slimbar's 14 (applied first): content height = rest + 1, so the
+    # panes' bottom border falls outside the window, like the right one
+    ('topbar', 0x48958, 0x3800000e, 0x3800ffff, 'window layout: bottom bar height 14 -> -1'),
+    # The icon view's scroller reclaims the resize handle's corner when the
+    # window has a toolbar (its bottom bar held the handle); leave it free as
+    # without a toolbar, so the scroll bar stops above the handle.
+    ('topbar', 0x3cd50, 0x809f02bc, 0x38800000, 'icon view scroller: reclaim corner = has toolbar -> 0'),
+    # (plus build_topbar_fix/write_topbar_fix: the sidebar divider's drawing, 20 rows low otherwise)
 ]
 SET_NAMES = ['nometal', 'square', 'statusbar', 'gap', 'shadow', 'softlines', 'slimbar']
-SETS = {n: {p[1]: p for p in PATCHES if p[0] == n} for n in SET_NAMES}
+OPTIONAL_SETS = ['topbar']
+SETS = {n: {p[1]: p for p in PATCHES if p[0] == n} for n in SET_NAMES + OPTIONAL_SETS}
 
 # Framed-box painter's metal fill section (QuickDraw erase inside a CG bracket,
 # so it never showed): skipped and reused for the divider's erase entry point.
@@ -81,6 +100,17 @@ FRAMEDBOX_RESUME = 0x19fb30    # lis r29,0x32 (one-time grip image load)
 DIVIDER_CGRECT_CALL = 0x22500  # bl sub_14fb4 in the divider's draw routine
 # (10.3.9 addresses; located in other builds like the PATCHES sites)
 DIVIDER_ANCHORS = [FRAMEDBOX_SKIP, FRAMEDBOX_RESUME, DIVIDER_CGRECT_CALL]
+
+# 'topbar': QD rect -> CGRect converter (sub_14fb4) and its callers that pass
+# port rects (see cave.build_cgrect_port). The port entry lives in the bottom
+# status bar rect branch of sub_2adc8, dead once 'topbar' always takes the top.
+CGRECT_FN = 0x14fb4
+CGRECT_STWU = 0x14fc4          # stwu r1,-0x60(r1): last prologue word
+CGRECT_TOP = 0x14fec           # lha r0,0x48(r1): window content top
+CGRECT_PORT_CALLERS = [0x207e0,   # pane border lines, drawn by the divider
+                       0x4e710]   # splitter repaint while dragging the divider
+BOTTOMBAR_DEAD = (0x2ae14, 0x2ae70)   # after 'topbar's b at 0x2ae10, up to the top rect
+TOPBAR_ANCHORS = [CGRECT_STWU, CGRECT_TOP, BOTTOMBAR_DEAD[0]] + CGRECT_PORT_CALLERS
 
 REF_PATH = __file__.rsplit('/', 2)[0] + '/orig/Finder-10.3.9'
 
@@ -99,10 +129,14 @@ def text_words(m):
     return s, [struct.unpack_from('>I', m.data, s['offset'] + 4*i)[0] for i in range(s['size'] // 4)]
 
 
-def locate(ref, target):
+def locate(ref, target, names=None):
     """Map each 10.3.9 patch address to its address in `target` (identity for the
-    stock file; signature match for re-prebound copies)."""
-    anchors = [p[1] for p in PATCHES] + DIVIDER_ANCHORS
+    stock file; signature match for re-prebound copies). Only the sites of the
+    sets in `names` (default: all) are looked up, so an optional set's sites
+    needn't exist in builds that don't use it."""
+    anchors = [p[1] for p in PATCHES if names is None or p[0] in names] + DIVIDER_ANCHORS
+    if names is None or 'topbar' in names:
+        anchors += TOPBAR_ANCHORS
     if ref.data == target.data:
         return {a: a for a in anchors}
     rs, rw = text_words(ref)
@@ -133,15 +167,16 @@ def stub_addr(m, name):
     sys.exit('import %s not found' % name)
 
 
-def place_cave(m, data, hook, quiet):
+def place_cave(m, data, hook, quiet, topbar=False):
     """Write tools/cave.py's routine + constants into the free space at the
-    end of __TEXT. Returns {'addr': routine, 'gray': border-line gray float}."""
+    end of __TEXT (the top-bar routine instead of the gradient with 'topbar').
+    Returns {'addr': routine, 'gray': border-line gray float}."""
     import cave
     last = max(x['addr'] + x['size'] for x in m.sections if x['seg'] == '__TEXT')
     seg = [x for x in m.segments if x['name'] == '__TEXT'][0]
     caddr = (last + 15) & ~15
     stubs = {nm: stub_addr(m, nm) for nm in cave.STUBS_NEEDED}
-    code, gray = cave.build(caddr, hook, stubs)
+    code, gray = (cave.build_topbar if topbar else cave.build)(caddr, hook, stubs)
     coff = m.addr2off(caddr)
     room = seg['vmaddr'] + seg['filesize'] - caddr
     if len(code) > room:
@@ -178,8 +213,9 @@ def place_fill(m, data, statusbar_branch, hook, quiet):
 
 
 
-def place_divider(m, data, fill, sites, quiet):
-    """Erase the sidebar divider before it draws its grip (window resizes)."""
+def place_divider(m, data, fill, sites, quiet, cg_entry=None):
+    """Erase the sidebar divider before it draws its grip (window resizes).
+    cg_entry: converter entry to call instead of the original ('topbar')."""
     import cave
     ref = MachO(REF_PATH)
     def w(mm, a): return struct.unpack_from('>I', mm.data, mm.addr2off(a))[0]
@@ -202,7 +238,7 @@ def place_divider(m, data, fill, sites, quiet):
     stub.b(resume)
     code = stub.assemble()
     entry = skip + len(code)
-    code += cave.build_divider_entry(entry, cg_rect_fn, body)
+    code += cave.build_divider_entry(entry, cg_entry or cg_rect_fn, body)
     assert skip + len(code) <= resume, 'divider entry does not fit'
     off = m.addr2off(skip)
     data[off:off + len(code)] = code
@@ -218,18 +254,60 @@ def w2(data, m, a):
     return struct.unpack_from('>I', data, m.addr2off(a))[0]
 
 
+def build_topbar_fix(m, data, sites):
+    """cave.build_cgrect_port for this build: (code, entries, patches), where
+    patches are (addr, expected word, new word, comment). Written by
+    write_topbar_fix after the PATCHES loop ('slimbar' edits two words of
+    the dead branch it reuses)."""
+    import cave
+    start, end = sites[BOTTOMBAR_DEAD[0]], sites[BOTTOMBAR_DEAD[0]] + (BOTTOMBAR_DEAD[1] - BOTTOMBAR_DEAD[0])
+    fn = sites[CGRECT_STWU] - (CGRECT_STWU - CGRECT_FN)
+    assert w2(data, m, fn) == 0x7c0802a6 and w2(data, m, fn + 4) == 0xbf81fff0, 'unexpected converter prologue'
+    stubs = {nm: stub_addr(m, nm) for nm in cave.CGRECT_STUBS}
+    code, at = cave.build_cgrect_port(start, fn, stubs)
+    assert start + len(code) <= end, 'origin fix does not fit the dead branch'
+    def b(src, dst, link=0): return 0x48000000 | ((dst - src) & 0x03fffffc) | link
+    patches = [(sites[CGRECT_STWU], 0x9421ffa0, b(sites[CGRECT_STWU], at['normal']), 'QD->CG rect: prologue -> normal entry (r31 = 0)'),
+               (sites[CGRECT_TOP], 0xa8010048, b(sites[CGRECT_TOP], at['top']), 'QD->CG rect: content top -> + port origin for port rects')]
+    for c in CGRECT_PORT_CALLERS:
+        a = sites[c]
+        patches.append((a, None, b(a, at['port'], 1), 'QD->CG rect call -> port-rect entry'))
+    return code, at, patches
+
+
+def write_topbar_fix(m, data, fix, quiet):
+    code, at, patches = fix
+    off = m.addr2off(at['port'])
+    data[off:off + len(code)] = code
+    if not quiet:
+        print('topbar    %08x file+%06x  %d bytes: QD->CG rect entry for port rects, in the dead bottom-bar branch' % (
+            at['port'], off, len(code)))
+    for a, expect, new, why in patches:
+        cur = w2(data, m, a)
+        if expect is None:
+            assert cur >> 26 == 18 and cur & 1, 'expected a bl at %08x' % a
+        else:
+            assert cur == expect, '%08x: %08x != %08x (%s)' % (a, cur, expect, why)
+        struct.pack_into('>I', data, m.addr2off(a), new)
+        if not quiet:
+            print('topbar    %08x file+%06x  %08x -> %08x  %s' % (a, m.addr2off(a), cur, new, why))
+
+
 def apply(path_in, path_out, names=SET_NAMES, quiet=False):
     ref, m = MachO(REF_PATH), MachO(path_in)
-    sites = locate(ref, m)
+    sites = locate(ref, m, names)
     data = bytearray(m.data)
     cv = None
+    if 'topbar' in names:
+        assert 'shadow' in names and 'slimbar' in names, "'topbar' needs 'shadow' and 'slimbar'"
     if 'shadow' in names or 'softlines' in names:
-        cv = place_cave(m, data, sites[0x23b90], quiet)
+        cv = place_cave(m, data, sites[0x23b90], quiet, topbar='topbar' in names)
+    fix = build_topbar_fix(m, data, sites) if 'topbar' in names else None
     fill = None
     if 'gap' in names:
         assert 'statusbar' in names, "'gap' needs 'statusbar' (its helper lives in the dead metal branch)"
         fill = place_fill(m, data, sites[0x23b0c], sites[0x23b90], quiet)
-        place_divider(m, data, fill, sites, quiet)
+        place_divider(m, data, fill, sites, quiet, cg_entry=fix[1]['port'] if fix else None)
     for p in PATCHES:
         name, refaddr, expect, action, why = p
         if name not in names:
@@ -269,6 +347,8 @@ def apply(path_in, path_out, names=SET_NAMES, quiet=False):
         struct.pack_into('>I', data, off, new)
         if not quiet:
             print('%-9s %08x file+%06x  %08x -> %08x  %s' % (name, addr, off, cur, new, why))
+    if fix:
+        write_topbar_fix(m, data, fix, quiet)
     open(path_out, 'wb').write(bytes(data))
     return sites
 

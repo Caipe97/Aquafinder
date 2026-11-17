@@ -221,6 +221,79 @@ def build(cave, hook, stubs, gradient=GRADIENT_TOP_TO_BOTTOM, line_gray=None):
 STUBS_NEEDED = ['_GetForeColor', '_RGBForeColor', '_PaintRect', '_GetPort',
                 '_GetPortBounds', '_SetThemeBackground', '_EraseRect']
 
+# Status bar under the toolbar (patch.py 'topbar'): the bar is the top 20 rows
+# of the window's port (the Finder's top status bar rect, top + 0x14), with
+# Jaguar 10.2.8's 1px lines on its first and last row.
+TOPBAR_ROWS = 20
+TOPBAR_LINE = 163
+
+
+def build_topbar(cave, hook, stubs, line_gray=GRADIENT_TOP_TO_BOTTOM[0] / 255.0):
+    """Same hook and contract as build(), for the 'topbar' layout: the status
+    bar of a browser window gets the usual Aqua erase, then the two lines.
+
+    The erased rect can be just part of the bar (the text, when it changes),
+    so the lines are placed from the port bounds, not from the rect; the
+    object in r31 isn't the pane itself, so LPane's frame getters don't work
+    on it. This needs its own stack frame (0x80); the host already saved LR.
+    Returns (bytes, address of the float border-line gray)."""
+    a = Asm(cave)
+    r0, r1, r3, r4, r5, r30, r31 = 0, 1, 3, 4, 5, 30, 31
+    ret = hook + 0x18
+    v16 = TOPBAR_LINE * 0x101
+    a.lwz(r0, 0x120, r31)            # view->metal: the status bar of a browser window?
+    a.cmpwi(r0, 0)
+    a.beq('original')
+    a.li(r3, 0x34)                   # the original Aqua erase
+    a.li(r4, 0x20)
+    a.li(r5, 1)
+    a.bl(stubs['_SetThemeBackground'])
+    a.mr(r3, r30)
+    a.bl(stubs['_EraseRect'])
+    a.stwu(r1, -0x80, r1)
+    a.addi(r3, r1, 0x40)             # save pen color -> 0x40
+    a.bl(stubs['_GetForeColor'])
+    a.addi(r3, r1, 0x58)             # GetPort(0x58); GetPortBounds(port, 0x58)
+    a.bl(stubs['_GetPort'])
+    a.lwz(r3, 0x58, r1)
+    a.addi(r4, r1, 0x58)
+    a.bl(stubs['_GetPortBounds'])
+    a.li(r0, v16 - 0x10000 if v16 >= 0x8000 else v16)
+    a.sth(r0, 0x60, r1)
+    a.sth(r0, 0x62, r1)
+    a.sth(r0, 0x64, r1)
+    a.addi(r3, r1, 0x60)
+    a.bl(stubs['_RGBForeColor'])
+    a.lha(r5, 0x58, r1)              # row = {port.top, port.left, port.top + 1, port.right}
+    a.sth(r5, 0x68, r1)
+    a.addi(r0, r5, 1)
+    a.sth(r0, 0x6c, r1)
+    a.lha(r0, 0x5a, r1)
+    a.sth(r0, 0x6a, r1)
+    a.lha(r0, 0x5e, r1)
+    a.sth(r0, 0x6e, r1)
+    a.addi(r3, r1, 0x68)
+    a.bl(stubs['_PaintRect'])        # top line
+    a.lha(r5, 0x58, r1)              # row = port.top + TOPBAR_ROWS - 1
+    a.addi(r5, r5, TOPBAR_ROWS - 1)
+    a.sth(r5, 0x68, r1)
+    a.addi(r0, r5, 1)
+    a.sth(r0, 0x6c, r1)
+    a.addi(r3, r1, 0x68)
+    a.bl(stubs['_PaintRect'])        # bottom line
+    a.addi(r3, r1, 0x40)             # restore pen color
+    a.bl(stubs['_RGBForeColor'])
+    a.addi(r1, r1, 0x80)
+    a.b(ret)
+
+    a.label('original')              # not a browser window: original Aqua erase
+    a.li(r3, 0x34)
+    a.b(hook + 4)
+
+    a.label('line_gray')             # float gray for the panes' 1px border lines
+    a.data(struct.pack('>f', line_gray))
+    return a.assemble(), a.labels['line_gray']
+
 
 def build_fill_white(addr, stubs, one_addr):
     """CGFillRectWhite(CGContextRef ctx /*r3*/, const CGRect *clipped /*r4*/,
@@ -270,6 +343,61 @@ def build_fill_white(addr, stubs, one_addr):
 
 
 FILL_STUBS = ['_CGContextSetGrayFillColor', '_CGContextFillRect']
+
+
+def build_cgrect_port(addr, cg_rect_fn, stubs):
+    """A second entry into the QD rect -> CGRect converter (cg_rect_fn,
+    sub_14fb4 in 10.3.9) for rects in port coordinates (patch.py 'topbar').
+
+    The converter flips y with the window's content height, which matches
+    the CG context only while the port origin is (0, 0). With the status bar
+    on top, the browser panes sit 20 rows down and are focused with origin
+    (0, -20). Most callers pass local rects and come out right, but the
+    sidebar divider's own drawing (its fill, grip and the pane border lines,
+    and the splitter repaint) passes port rects (CalcPortFrameRect) and
+    landed 20 rows low. Those callers call entry 'port' instead.
+
+    Layout (23 words, in the bottom-status-bar branch that 'topbar' leaves
+    dead): 'port' = the converter's prologue + r31 = 1; 'normal' = the
+    prologue's last word + r31 = 0 (the converter's own prologue branches
+    here); 'top' = the hooked 'lha r0,0x48(r1)' (content top), plus the port
+    origin when r31 = 1. r31 is saved by the converter's stmw r28 and unused
+    in its body; 0x38..0x3f of its 0x60 frame are free.
+    Returns (bytes, {'port', 'normal', 'top'} addresses)."""
+    a = Asm(addr)
+    r0, r1, r3, r4, r5, r28, r31 = 0, 1, 3, 4, 5, 28, 31
+    body = cg_rect_fn + 0x14          # after mflr/stmw/stw/mr r28,r3/stwu
+    a.label('port')
+    a.mflr(r0)
+    a.emit(0xbf81fff0)                # stmw r28,-0x10(r1)
+    a.stw(r0, 8, r1)
+    a.mr(r28, r3)
+    a.stwu(r1, -0x60, r1)
+    a.li(r31, 1)
+    a.b(body)
+    a.label('normal')
+    a.stwu(r1, -0x60, r1)
+    a.li(r31, 0)
+    a.b(body)
+    a.label('top')
+    a.lha(r0, 0x48, r1)               # the hooked instruction: content top
+    a.cmpwi(r31, 0)
+    a.beq('back')
+    a.addi(r3, r1, 0x38)              # top += GetPortBounds(GetPort()).top
+    a.bl(stubs['_GetPort'])
+    a.lwz(r3, 0x38, r1)
+    a.addi(r4, r1, 0x38)
+    a.bl(stubs['_GetPortBounds'])
+    a.lha(r0, 0x48, r1)
+    a.lha(r5, 0x38, r1)
+    a.emit(0x7c002a14)                # add r0,r0,r5
+    a.label('back')
+    a.b(cg_rect_fn + 0x3c)            # the word after the hooked one
+    code = a.assemble()
+    return code, {k: a.labels[k] for k in ('port', 'normal', 'top')}
+
+
+CGRECT_STUBS = ['_GetPort', '_GetPortBounds']
 
 
 def build_divider_entry(addr, cg_rect_fn, fill_body):

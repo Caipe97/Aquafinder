@@ -3,6 +3,8 @@
 #
 #   finder     Aqua (non-brushed-metal) Finder windows that keep toolbar + sidebar,
 #              a Jaguar-style soft shadow for the bottom bar and softer pane borders
+#   topbar     option for finder: the status bar under the toolbar, as in Jaguar,
+#              instead of at the bottom (restore topbar puts it back at the bottom)
 #   titlebars  Jaguar-style pinstriped, translucent window title bars
 #              (the HIToolbox theme, plus AppKit so Cocoa windows blend too)
 #
@@ -10,8 +12,10 @@
 #   logo       Jaguar branding: Garamond "Mac OS X" in About This Mac and the
 #              login panel, and Jaguar's Finder icon in the Finder and Dock
 #
-#   sudo sh aquafinder.sh install [finder|titlebars|logo]   (default: all)
-#   sudo sh aquafinder.sh restore [finder|titlebars|logo]   (default: all)
+#   sudo sh aquafinder.sh install [finder|topbar|titlebars|logo]   (default: all)
+#   sudo sh aquafinder.sh restore [finder|topbar|titlebars|logo]   (default: all)
+#
+# install finder (and install all) keeps the Finder's current status bar style.
 #
 # Only recognised files are touched (the Finder is identified by its code
 # section, so re-prebinding by Software Update doesn't matter). Each is backed up, patched
@@ -42,39 +46,36 @@ region() {   # region <file> <skip> <count>: md5 of 4 KiB blocks, or whole file 
 
 identify() {   # identify <file> <component>: sets KEY LABEL STATE SKIP COUNT WANT ORIG CUR
   [ -f "$1" ] || die "missing $1"
-  KEY=; LABEL=; STATE=unknown; CUR=$(sum "$1")
+  KEY=; LABEL=; STATE=unknown; STYLE=; EDITKEY=; SWITCH=; CUR=$(sum "$1")
   case "$2" in
-    finder)    identify_finder "$1" ;;
+    finder|topbar) identify_finder "$1" ;;
     titlebars) identify_theme "$1" ;;
     appkit)    identify_appkit "$1" ;;
     logo)      identify_logo "$1" ;;
   esac
 }
+finder_target() {   # WANT/EDITKEY for FINDER_STYLE (bottom|top|keep) given STYLE found
+  W="${FINDER_STYLE:-keep}"; [ "$W" = keep ] && W="${STYLE:-bottom}"
+  if [ "$W" = top ]; then WANT=$HT; EDITKEY=${KEY}top; else WANT=$HB; EDITKEY=$KEY; fi
+  if [ "$STATE" = patched ] && [ "$STYLE" != "$W" ]; then STATE=oldpatch; SWITCH=$W; fi
+}
 identify_finder() {
+  HB=188e07390cc6c3c814210359ecdd1359; HT=99f7b842b8d030da85e9ff87e4256896
   R=$(region "$1" 9 662)
   case "$R" in
-    f3f611a457c8bff841baff2e3cf78ca6) KEY=finder1039; LABEL='Finder 10.3.9'; STATE=original; SKIP=9; COUNT=662; WANT=188e07390cc6c3c814210359ecdd1359; ORIG=f3f611a457c8bff841baff2e3cf78ca6; return ;;
-    188e07390cc6c3c814210359ecdd1359) KEY=finder1039; LABEL='Finder 10.3.9'; STATE=patched;  SKIP=9; COUNT=662; WANT=188e07390cc6c3c814210359ecdd1359; ORIG=f3f611a457c8bff841baff2e3cf78ca6; return ;;
+    f3f611a457c8bff841baff2e3cf78ca6) STATE=original ;;
+    188e07390cc6c3c814210359ecdd1359) STATE=patched; STYLE=bottom ;;
+    99f7b842b8d030da85e9ff87e4256896) STATE=patched; STYLE=top ;;
+    b6a1194a3868172a50d3b80c9cbc2895) STATE=oldpatch; STYLE=bottom ;;
   esac
-  R2=$(region "$1" 3 668)
-  case "$R2" in
-    43d2b8988616caa9cb1d02cec83c4990) KEY=finder1039; LABEL='Finder 10.3.9'; STATE=oldpatch; SKIP=9; COUNT=662; WANT=188e07390cc6c3c814210359ecdd1359; ORIG=f3f611a457c8bff841baff2e3cf78ca6; return ;;
+  [ "$STATE" = unknown ] && case "$(region "$1" 3 668)" in
+    43d2b8988616caa9cb1d02cec83c4990) STATE=oldpatch; STYLE=bottom ;;
+    bfc33742ee7998de9da99d420abb1eb0) STATE=oldpatch; STYLE=bottom ;;
+    df02d7ed292a35e280fadba6fb301e2e) STATE=oldpatch; STYLE=bottom ;;
   esac
-  case "$R" in
-  esac
-  R2=$(region "$1" 3 668)
-  case "$R2" in
-    bfc33742ee7998de9da99d420abb1eb0) KEY=finder1039; LABEL='Finder 10.3.9'; STATE=oldpatch; SKIP=9; COUNT=662; WANT=188e07390cc6c3c814210359ecdd1359; ORIG=f3f611a457c8bff841baff2e3cf78ca6; return ;;
-  esac
-  case "$R" in
-  esac
-  R2=$(region "$1" 3 668)
-  case "$R2" in
-    df02d7ed292a35e280fadba6fb301e2e) KEY=finder1039; LABEL='Finder 10.3.9'; STATE=oldpatch; SKIP=9; COUNT=662; WANT=188e07390cc6c3c814210359ecdd1359; ORIG=f3f611a457c8bff841baff2e3cf78ca6; return ;;
-  esac
-  case "$R" in
-    b6a1194a3868172a50d3b80c9cbc2895) KEY=finder1039; LABEL='Finder 10.3.9'; STATE=oldpatch; SKIP=9; COUNT=662; WANT=188e07390cc6c3c814210359ecdd1359; ORIG=f3f611a457c8bff841baff2e3cf78ca6; return ;;
-  esac
+  if [ "$STATE" != unknown ]; then
+    KEY=finder1039; LABEL='Finder 10.3.9'; SKIP=9; COUNT=662; ORIG=f3f611a457c8bff841baff2e3cf78ca6; finder_target; return
+  fi
 }
 identify_theme() {
   R=$(region "$1" 0 0)
@@ -137,6 +138,29 @@ apply_edits() {
     put 1698498 2 '\377\344'
     put 1698540 52 '\073\300\000\001\070\000\000\000\220\001\000\240\110\000\000\070\174\010\002\246\220\001\000\010\224\041\377\240\223\341\000\134\113\347\124\251\200\173\000\000\177\244\353\170\177\245\353\170\113\350\100\004'
     put 2748176 216 '\200\037\001\040\057\200\000\000\101\236\000\264\223\201\000\070\070\141\000\100\113\362\066\345\070\141\000\120\113\362\055\255\200\141\000\120\070\201\000\120\113\362\050\121\250\001\000\124\260\001\000\106\253\236\000\000\250\036\000\004\177\234\000\000\100\234\000\154\250\201\000\106\174\234\040\120\070\204\377\377\057\204\000\016\100\235\000\010\070\200\000\016\074\240\000\052\070\245\377\324\174\005\040\256\120\000\104\056\260\001\000\110\260\001\000\112\260\001\000\114\070\141\000\110\113\362\063\335\263\201\000\120\250\036\000\002\260\001\000\122\070\034\000\001\260\001\000\124\250\036\000\006\260\001\000\126\070\141\000\120\113\362\065\051\073\234\000\001\113\377\377\220\070\141\000\100\113\362\063\251\203\201\000\070\113\330\073\340\070\140\000\064\113\330\073\304\365\370\373\375\375\374\372\367\363\357\351\345\336\331\324\000\077\124\324\325'
+    ;;
+  finder1039top)
+    put 81860 4 '\110\001\136\154'
+    put 81900 4 '\110\001\136\120'
+    put 86111 1 '\016'
+    put 128992 4 '\110\000\246\065'
+    put 136448 4 '\110\027\325\375'
+    put 142092 136 '\110\000\000\204\174\010\002\246\220\001\000\010\224\041\377\240\223\341\000\134\174\177\033\170\300\245\000\004\174\244\204\252\071\041\000\100\174\251\205\252\075\040\000\052\300\051\376\110\300\141\000\104\377\203\050\000\100\236\000\030\354\143\010\052\320\141\000\104\300\201\000\114\354\204\010\050\320\201\000\114\374\100\010\220\110\032\111\111\177\343\373\170\071\041\000\100\174\211\204\252\110\031\367\211\203\341\000\134\070\041\000\140\200\001\000\010\174\010\003\246\116\200\000\040\110\031\356\261\110\000\000\034\110\047\303\200'
+    put 171536 92 '\110\000\000\140\174\010\002\246\277\201\377\360\220\001\000\010\174\174\033\170\224\041\377\240\073\340\000\001\113\376\241\234\224\041\377\240\073\340\000\000\113\376\241\220\250\001\000\110\057\237\000\000\101\236\000\044\070\141\000\070\110\031\176\215\200\141\000\070\070\201\000\070\110\031\171\061\250\001\000\110\250\241\000\070\174\000\052\024\113\376\241\210'
+    put 182006 2 '\377\310'
+    put 245072 4 '\070\200\000\000'
+    put 278294 1 '\000'
+    put 278351 1 '\000'
+    put 293060 4 '\140\000\000\000'
+    put 293210 2 '\377\377'
+    put 293238 2 '\342\024'
+    put 317201 3 '\375\307\005'
+    put 317344 16 '\200\141\000\164\070\201\000\260\070\241\000\320\113\375\123\145'
+    put 448763 1 '\000'
+    put 448790 1 '\000'
+    put 1698498 2 '\377\310'
+    put 1698540 52 '\073\300\000\001\070\000\000\000\220\001\000\240\110\000\000\070\174\010\002\246\220\001\000\010\224\041\377\240\223\341\000\134\113\350\263\011\200\173\000\000\177\244\353\170\177\245\353\170\113\350\100\004'
+    put 2748176 188 '\200\037\001\040\057\200\000\000\101\236\000\250\070\140\000\064\070\200\000\040\070\240\000\001\113\362\135\361\177\303\363\170\113\362\056\251\224\041\377\200\070\141\000\100\113\362\066\315\070\141\000\130\113\362\055\225\200\141\000\130\070\201\000\130\113\362\050\071\070\000\243\243\260\001\000\140\260\001\000\142\260\001\000\144\070\141\000\140\113\362\064\001\250\241\000\130\260\241\000\150\070\005\000\001\260\001\000\154\250\001\000\132\260\001\000\152\250\001\000\136\260\001\000\156\070\141\000\150\113\362\065\111\250\241\000\130\070\245\000\023\260\241\000\150\070\005\000\001\260\001\000\154\070\141\000\150\113\362\065\055\070\141\000\100\113\362\063\265\070\041\000\200\113\330\073\354\070\140\000\064\113\330\073\320\077\124\324\325'
     ;;
   theme)
     put 34199 21 '\000\000\000\000\000\000\000\000\000\000\000\000\000\000\000\000\000\000\000\000\000'
@@ -629,7 +653,8 @@ install_one() {   # install_one <file> <name>
     oldpatch)
       # patched by an older Aquafinder: re-patch starting from the saved original
       find_backup "$F" || { echo "$2: patched by an older Aquafinder, but its original backup is missing; skipped."; return 1; }
-      SRC="$BK"; HOW="updated from an older Aquafinder" ;;
+      SRC="$BK"; HOW="updated from an older Aquafinder"
+      [ -n "$SWITCH" ] && HOW="status bar moved to the $SWITCH" ;;
     original)
       mkdir -p "$BACKUP_DIR" || die "cannot create $BACKUP_DIR"
       BK="$BACKUP_DIR/${F##*/}-$KEY.orig"
@@ -640,7 +665,7 @@ install_one() {   # install_one <file> <name>
   esac
   swap_in "$F" "$F"                                 # copy keeps owner and mode
   [ "$SRC" = "$F" ] || cat "$SRC" > "$TMP" || die "cannot copy $SRC"
-  apply_edits "$KEY"
+  apply_edits "${EDITKEY:-$KEY}"
   [ "$(region "$TMP" $SKIP $COUNT)" = "$WANT" ] || die "$2: patched copy failed verification; nothing changed."
   mv -f "$TMP" "$F" || die "could not replace $F"; TMP=
   echo "$2: $HOW ($LABEL). Backup: $BK"
@@ -664,7 +689,7 @@ status_one() {
   identify "$1" "$2"
   case "$STATE" in
     original) echo "$2: original ($LABEL)" ;;
-    patched)  echo "$2: Aquafinder installed ($LABEL)" ;;
+    patched)  echo "$2: Aquafinder installed ($LABEL${STYLE:+, $STYLE status bar})" ;;
     oldpatch) echo "$2: older Aquafinder installed ($LABEL); run install to update" ;;
     *)        echo "$2: not recognised (md5 $CUR)" ;;
   esac
@@ -675,9 +700,28 @@ need_root() {
   [ "$(id -u)" = 0 ] || die "run with sudo: sudo sh $0 $*"
 }
 
+topbar_off() {   # restore topbar: a top-bar Finder goes back to the bottom bar
+  identify "$FINDER" finder
+  case "$STATE" in
+    original|unknown) echo "topbar: off (the Aqua Finder isn't installed)."; return 0 ;;
+  esac
+  [ "$STYLE" = top ] || { echo "topbar: already off ($LABEL)."; return 0; }
+  FINDER_STYLE=bottom; install_one "$FINDER" topbar; R=$?; FINDER_STYLE=; return $R
+}
+
+status_topbar() {   # one line for the option: installed = status bar at the top
+  identify "$FINDER" finder
+  case "$STATE" in
+    unknown) echo "topbar: not recognised (md5 $CUR)" ;;
+    original) echo "topbar: original (Aqua Finder not installed)" ;;
+    *) if [ "$STYLE" = top ]; then echo "topbar: Aquafinder installed (status bar under the toolbar)"
+       else echo "topbar: original (status bar at the bottom)"; fi ;;
+  esac
+}
+
 finish() {
   [ -n "$NO_RESTART" ] && return 0
-  case "$CHANGED" in *finder*)
+  case "$CHANGED" in *finder*|*topbar*)
     # no killall without the optional BSD Subsystem; ps is in /bin
     for P in $(ps -axc | awk '$NF == "Finder" {print $1}'); do kill "$P" 2>/dev/null; done
     echo "Finder restarted." ;;
@@ -696,27 +740,30 @@ finish() {
 }
 
 WHAT="${2:-all}"
-case "$WHAT" in finder|titlebars|logo|all) ;; *) echo "unknown component: $WHAT"; exit 1 ;; esac
+case "$WHAT" in finder|topbar|titlebars|logo|all) ;; *) echo "unknown component: $WHAT"; exit 1 ;; esac
 want() { [ "$WHAT" = all ] || [ "$WHAT" = "$1" ]; }
 CHANGED=; RC=0
 case "$1" in
   install)
     need_root install
     want finder    && { install_one "$FINDER" finder || RC=1; }
+    [ "$WHAT" = topbar ] && { FINDER_STYLE=top; install_one "$FINDER" topbar || RC=1; FINDER_STYLE=; }
     want titlebars && { install_one "$THEME" titlebars || RC=1; install_one "$APPKIT" appkit || RC=1; }
     want logo      && for F in $LOGO_FILES; do install_one "$F" logo || RC=1; done
     finish ;;
   restore|uninstall)
     need_root restore
     want finder    && { restore_one "$FINDER" finder || RC=1; }
+    [ "$WHAT" = topbar ] && { topbar_off || RC=1; }
     want titlebars && { restore_one "$THEME" titlebars || RC=1; restore_one "$APPKIT" appkit || RC=1; }
     want logo      && for F in $LOGO_FILES; do restore_one "$F" logo || RC=1; done
     finish ;;
   status|"")
     status_one "$FINDER" finder
+    status_topbar
     status_one "$THEME" titlebars
     status_one "$APPKIT" appkit
     for F in $LOGO_FILES; do status_one "$F" logo; done ;;
-  *) echo "usage: sudo sh $0 [status|install|restore] [finder|titlebars|logo]"; exit 1 ;;
+  *) echo "usage: sudo sh $0 [status|install|restore] [finder|topbar|titlebars|logo]"; exit 1 ;;
 esac
 exit $RC

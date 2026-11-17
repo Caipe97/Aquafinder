@@ -17,6 +17,14 @@ Make Mac OS X 10.3.9 Panther look and fit better on small screens, like 800×600
 ![Bottom bar: stock (top) and Aquafinder (bottom)](screens/bottom-bar.png)
 ![Loading spinner in the bottom bar](screens/11-spinner.png)
 
+**Option: status bar under the toolbar**
+- As in Jaguar, the item count sits under the toolbar, between two thin lines, instead of at the bottom.
+- The sidebar and files run to the bottom of the window, and the resize corner sits in the
+  scroll bar's corner as in any Aqua window.
+- Off by default. Turn it on in the Aquafinder app, or with `install topbar` (see below).
+
+![Status bar under the toolbar](screens/topbar.png)
+
 **Title bars**
 - Pinstriped title bars from Jaguar (10.2) in every app.
 - Inactive windows get see-through title bars, in both Carbon apps (like the Finder) and Cocoa apps (like TextEdit).
@@ -63,6 +71,9 @@ It upgrades files patched by an older version, starting from the saved originals
 
 You can also install just one part: `install finder`, `install titlebars` or `install logo`.
 Check what's installed with `sh aquafinder.sh status`.
+
+To put the Finder's status bar under the toolbar, run `sudo sh aquafinder.sh install topbar`.
+`restore topbar` moves it back to the bottom. Updating with `install` keeps the style you chose.
 
 ## Undo
 
