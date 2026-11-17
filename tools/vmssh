@@ -1,0 +1,6 @@
+#!/bin/sh
+# Run a command in the Panther VM as root over SSH (VM must be booted with
+# vm/run-qemu.sh, which forwards localhost:2222 to the guest's sshd).
+#   tools/vmssh 'sw_vers'        tools/vmssh      (interactive shell)
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+exec ssh -F "$ROOT/vm/ssh/config" panther "$@"

@@ -1,0 +1,20 @@
+# Apple software: never publish these. Put your own copies here to rebuild.
+orig/
+build/
+theme/panther-*/
+theme/jaguar/
+theme/build/
+theme/render/
+
+# VM disk images, logs, screenshots taken by the tools, and the VM-only SSH key
+vm/*.img
+vm/*.qcow2
+vm/*.log
+vm/*.sock
+vm/shots/
+vm/ssh/
+
+# macOS / Python clutter
+.DS_Store
+__pycache__/
+*.pyc
