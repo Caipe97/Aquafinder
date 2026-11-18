@@ -52,7 +52,7 @@ Dock tile are the same files as Panther's.
 
 ## Install
 
-The easy way (Panther):
+The easy way, on Panther or Tiger:
 
 1. Copy [`dist/Aquafinder.dmg`](dist/Aquafinder.dmg) to the Mac and open it.
 2. Double-click **Aquafinder.pkg** and follow the installer.
@@ -63,9 +63,6 @@ Open the app any time to turn any part off or back on.
 Untick a part and click Apply to put Apple's original files back.
 
 ![Aquafinder app](screens/app.png)
-
-On Tiger, install from Terminal for now: the `Aquafinder.dmg` in `dist/` was built before
-Tiger support, and its installer only accepts 10.3.9.
 
 ### From Terminal
 
