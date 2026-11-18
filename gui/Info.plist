@@ -21,7 +21,7 @@
 	<key>CFBundleVersion</key>
 	<string>__VERSION__</string>
 	<key>CFBundleGetInfoString</key>
-	<string>Aquafinder __VERSION__ for Mac OS X 10.3.9</string>
+	<string>Aquafinder __VERSION__ for Mac OS X 10.3.9 and 10.4.11</string>
 	<key>LSMinimumSystemVersion</key>
 	<string>10.3</string>
 	<key>NSPrincipalClass</key>

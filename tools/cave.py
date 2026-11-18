@@ -383,3 +383,229 @@ def build_cgrect_port(addr, cg_rect_fn, stubs):
 
 
 CGRECT_STUBS = ['_GetPort', '_GetPortBounds']
+
+
+# Tiger 10.4.11 (patch.py TIGER_PATCHES 'shadow'): the status bar view's Draw
+# (vtable slot 0xe4, sub_42de4) calls its background fill sub_3f360(view, ctx)
+# (transparent: the window's white shows), then draws a 1px gray line (163)
+# on its bottom row. That call goes through build_tiger_bar's routine instead:
+# the original fill, then the rows above the bottom one in Jaguar's toolbar
+# pinstripes (as Panther's 'shadow' erases the bar with the toolbar brush).
+# The 163 line above the bar is the toolbar's own bottom line, so the bar
+# (19 rows, patch.py 'topbar') reads as Panther's: line, 18 stripes, line.
+# top_line=True draws a 163 line on the bar's top row too. HIView coordinates:
+# y down.
+TIGER_BAR_FILL = 0x3f360       # sub_3f360(view, ctx): the view's background fill
+TIGER_VIEW_BOUNDS = 0x13d48    # sub_13d48(&rect, view): HIViewGetBounds
+TIGER_BAR_STUBS = ['_CGContextSetRGBFillColor', '_CGContextFillRect']
+PINSTRIPES = (250, 255, 250, 233)   # Jaguar's toolbar rows below the top line
+
+
+def build_tiger_bar(cave, stubs, line=TOPBAR_LINE, top_line=False):
+    """cave: where the routine goes (constants first, then the entry point).
+    Called as fill(view r3, ctx r4). Returns (bytes, entry address)."""
+    consts = struct.pack('>6f', 1.0, line / 255.0, *[g / 255.0 for g in PINSTRIPES])
+    ONE, LINE, TAB, TAB_END = 0, 4, 8, 8 + 4 * len(PINSTRIPES)
+    entry = cave + len(consts)
+    a = Asm(cave)
+    a.data(consts)
+    hi, lo = (cave + 0x8000) >> 16, cave & 0xffff
+    r0, r1, r3, r4, r8, r9, r28, r29, r30, r31 = 0, 1, 3, 4, 8, 9, 28, 29, 30, 31
+    f0, f1, f2, f3, f4, f13 = 0, 1, 2, 3, 4, 13
+    # frame 0x80: 0x40 bounds {x, y, w, h}; 0x50 row rect {x, y, w, 1}; 0x60 end y
+    a.mflr(r0)
+    a.stw(r0, 8, r1)
+    a.stwu(r1, -0x80, r1)
+    for k, rr in enumerate((r28, r29, r30, r31)):
+        a.stw(rr, 0x70 + 4 * k, r1)
+    a.mr(r30, r3)                         # view
+    a.mr(r31, r4)                         # ctx
+    a.bl(TIGER_BAR_FILL)                  # the original fill
+    a.addi(r3, r1, 0x40)
+    a.mr(r4, r30)
+    a.bl(TIGER_VIEW_BOUNDS)
+    a.lis(r29, hi)
+    a.addi(r29, r29, lo)                  # r29 = constants
+    a.lfs(f0, 0x40, r1); a.stfs(f0, 0x50, r1)     # row.x = x
+    a.lfs(f0, 0x44, r1)                           # row.y = y (the top row), or
+    if not top_line:                              # y - 1 when the loop starts there
+        a.lfs(f13, ONE, r29)
+        a.fsubs(f0, f0, f13)
+    a.stfs(f0, 0x54, r1)
+    a.lfs(f0, 0x48, r1); a.stfs(f0, 0x58, r1)     # row.w = w
+    a.lfs(f0, ONE, r29); a.stfs(f0, 0x5c, r1)     # row.h = 1
+    a.lfs(f13, 0x4c, r1)                  # end = y + h - 1 (the bottom line's row)
+    a.lfs(f0, 0x44, r1)
+    a.fadds(f0, f0, f13)
+    a.lfs(f13, ONE, r29)
+    a.fsubs(f0, f0, f13)
+    a.stfs(f0, 0x60, r1)
+    if top_line:
+        a.mr(r3, r31)
+        a.lfs(f1, LINE, r29); a.fmr(f2, f1); a.fmr(f3, f1); a.lfs(f4, ONE, r29)
+        a.bl(stubs['_CGContextSetRGBFillColor'])
+        a.mr(r3, r31)
+        a.addi(r8, r1, 0x50)
+        a.lswi(r4, r8, 16)
+        a.bl(stubs['_CGContextFillRect'])
+    a.addi(r28, r29, TAB)                 # r28 = this row's gray
+    a.label('row')
+    a.lfs(f0, 0x54, r1)                   # next row: y += 1; stop at the bottom line
+    a.lfs(f13, ONE, r29)
+    a.fadds(f0, f0, f13)
+    a.stfs(f0, 0x54, r1)
+    a.lfs(f13, 0x60, r1)
+    a.fcmpu(f0, f13)
+    a.bge('done')
+    a.mr(r3, r31)
+    a.lfs(f1, 0, r28); a.fmr(f2, f1); a.fmr(f3, f1); a.lfs(f4, ONE, r29)
+    a.bl(stubs['_CGContextSetRGBFillColor'])
+    a.mr(r3, r31)
+    a.addi(r8, r1, 0x50)
+    a.lswi(r4, r8, 16)
+    a.bl(stubs['_CGContextFillRect'])
+    a.addi(r28, r28, 4)                   # next gray, wrapping after the last
+    a.addi(r9, r29, TAB_END)
+    a.cmpw(r28, r9)
+    a.bne('row')
+    a.addi(r28, r29, TAB)
+    a.b('row')
+    a.label('done')
+    for k, rr in enumerate((r28, r29, r30, r31)):
+        a.lwz(rr, 0x70 + 4 * k, r1)
+    a.addi(r1, r1, 0x80)
+    a.lwz(r0, 8, r1)
+    a.mtlr(r0)
+    a.blr()
+    return a.assemble(), entry
+
+
+# Tiger 10.4.11 (patch.py TIGER_PATCHES 'gap'): the sidebar divider. The
+# splitter view's Draw (sub_3f234) calls sub_3f304: its background fill, then
+# the virtual DrawDivider(view, ctx, &rect) (vtable slot 0x168, sub_3f3f8:
+# Tiger's dimple, HIThemeDrawPaneSplitter); then it outlines both panes. The
+# call goes to build_tiger_divider's routine instead: the column view's gradient (grip.py
+# GRADIENT), 15 columns from one left of the 13 px divider (the panes' 1px
+# outline columns, now that the outlines are gone, are the outer two), and the
+# grip's two ridges (grip.RIDGES), RIDGE_ROWS long, ending GRIP_BOTTOM rows
+# above the divider's bottom (the window's), as in Panther.
+TIGER_GRIP_BOTTOM = 4
+
+
+TIGER_DIVIDER_RECT = 0xe0      # the splitter's divider rect {x, y, w, h}
+
+
+def build_tiger_divider(cave, stubs):
+    """cave: where the routine goes (constants first). Two entry points:
+    draw(view r3, ctx r4, rect* r5) draws the divider into rect; the second,
+    returned, stands in for the splitter Draw's call of sub_3f304 (view r3,
+    ctx r4): the background fill, then the divider into the view's own
+    divider rect, so the vtable (in __DATA, rewritten by re-prebinding's
+    neighbours) is left alone. Returns (bytes, the second entry)."""
+    import grip
+    grays = [g / 255.0 for g in grip.GRADIENT]
+    (c1, g1), (c2, g2) = grip.RIDGES
+    consts = struct.pack('>%df' % (4 + len(grays)), 1.0, float(grip.RIDGE_ROWS),
+                         float(grip.RIDGE_ROWS + TIGER_GRIP_BOTTOM), 0.0, *grays)
+    consts += struct.pack('>2f', g1 / 255.0, g2 / 255.0)
+    ONE, RIDGE_H, RIDGE_UP, TAB = 0, 4, 8, 16
+    TAB_END = TAB + 4 * len(grays)
+    RG1, RG2 = TAB_END, TAB_END + 4
+    entry = cave + len(consts)
+    a = Asm(cave)
+    a.data(consts)
+    hi, lo = (cave + 0x8000) >> 16, cave & 0xffff
+    r0, r1, r3, r4, r5, r8, r9, r28, r29, r31 = 0, 1, 3, 4, 5, 8, 9, 28, 29, 31
+    f0, f1, f2, f3, f4, f13 = 0, 1, 2, 3, 4, 13
+    # frame 0x80: 0x40 divider rect {x, y, w, h}; 0x50 fill rect {x, y, w, h}
+    a.mflr(r0)
+    a.stw(r0, 8, r1)
+    a.stwu(r1, -0x80, r1)
+    for k, rr in enumerate((r28, r29, r31)):
+        a.stw(rr, 0x70 + 4 * k, r1)
+    a.mr(r31, r4)                         # ctx
+    a.mr(r9, r5)                          # the divider rect -> 0x40 (via r5..r8;
+    a.lswi(r5, r9, 16)                    # lswi's base must be outside them)
+    a.addi(r9, r1, 0x40)
+    a.stswi(r5, r9, 16)
+    a.lis(r29, hi)
+    a.addi(r29, r29, lo)                  # r29 = constants
+    a.lfs(f0, 0x40, r1); a.lfs(f13, ONE, r29); a.fsubs(f0, f0, f13)
+    a.stfs(f0, 0x50, r1)                  # column x = x - 1
+    a.lfs(f0, 0x44, r1); a.stfs(f0, 0x54, r1)     # y
+    a.stfs(f13, 0x58, r1)                 # w = 1
+    a.lfs(f0, 0x4c, r1); a.stfs(f0, 0x5c, r1)     # h
+    a.addi(r28, r29, TAB)                 # r28 = this column's gray
+    a.label('col')
+    a.mr(r3, r31)
+    a.lfs(f1, 0, r28); a.fmr(f2, f1); a.fmr(f3, f1); a.lfs(f4, ONE, r29)
+    a.bl(stubs['_CGContextSetRGBFillColor'])
+    a.mr(r3, r31)
+    a.addi(r9, r1, 0x50)
+    a.lswi(r4, r9, 16)
+    a.bl(stubs['_CGContextFillRect'])
+    a.lfs(f0, 0x50, r1); a.lfs(f13, ONE, r29); a.fadds(f0, f0, f13)
+    a.stfs(f0, 0x50, r1)
+    a.addi(r28, r28, 4)
+    a.addi(r9, r29, TAB_END)
+    a.cmpw(r28, r9)
+    a.bne('col')
+    # the ridges: {x - 1 + col, y + h - (RIDGE_ROWS + GRIP_BOTTOM), 1, RIDGE_ROWS}
+    a.lfs(f0, 0x44, r1); a.lfs(f13, 0x4c, r1); a.fadds(f0, f0, f13)
+    a.lfs(f13, RIDGE_UP, r29); a.fsubs(f0, f0, f13)
+    a.stfs(f0, 0x54, r1)
+    a.lfs(f0, RIDGE_H, r29); a.stfs(f0, 0x5c, r1)
+    for col, gray in ((c1, RG1), (c2, RG2)):
+        a.lfs(f0, 0x40, r1)               # x - 1 + col
+        a.lfs(f13, ONE, r29)
+        a.fsubs(f0, f0, f13)
+        for _ in range(col):
+            a.fadds(f0, f0, f13)
+        a.stfs(f0, 0x50, r1)
+        a.mr(r3, r31)
+        a.lfs(f1, gray, r29); a.fmr(f2, f1); a.fmr(f3, f1); a.lfs(f4, ONE, r29)
+        a.bl(stubs['_CGContextSetRGBFillColor'])
+        a.mr(r3, r31)
+        a.addi(r9, r1, 0x50)
+        a.lswi(r4, r9, 16)
+        a.bl(stubs['_CGContextFillRect'])
+    for k, rr in enumerate((r28, r29, r31)):
+        a.lwz(rr, 0x70 + 4 * k, r1)
+    a.addi(r1, r1, 0x80)
+    a.lwz(r0, 8, r1)
+    a.mtlr(r0)
+    a.blr()
+    # draw_all(view, ctx): sub_3f360(view, ctx), then draw(view, ctx, &view->rect)
+    r30 = 30
+    a.label('draw_all')
+    a.mflr(r0)
+    a.stw(r0, 8, r1)
+    a.stwu(r1, -0x60, r1)
+    a.stw(r30, 0x50, r1)
+    a.stw(r31, 0x54, r1)
+    a.mr(r30, r3)
+    a.mr(r31, r4)
+    a.bl(TIGER_BAR_FILL)
+    a.mr(r3, r30)
+    a.mr(r4, r31)
+    a.addi(r5, r30, TIGER_DIVIDER_RECT)
+    a.bl(entry)
+    a.lwz(r30, 0x50, r1)
+    a.lwz(r31, 0x54, r1)
+    a.addi(r1, r1, 0x60)
+    a.lwz(r0, 8, r1)
+    a.mtlr(r0)
+    a.blr()
+    return a.assemble(), a.labels['draw_all']
+
+
+# Tiger 10.4.11 (patch.py TIGER_PATCHES 'softlines'): lighter 1px lines, 212
+# (BAR_LINE, Jaguar's pane borders), as RGBA floats {g, g, g, 1}: the search
+# scope bar's bottom line loads its first word (the gray) instead of 0.54
+# (138), and the search window's path pane strokes its frame with it instead
+# of its own 158 gray.
+def build_tiger_line(cave, stubs, gray=BAR_LINE):
+    """Constants only (no code). Returns (bytes, address of the RGBA gray,
+    address of the float gray: the same)."""
+    g = gray / 255.0
+    return struct.pack('>4f', g, g, g, 1.0), cave, cave

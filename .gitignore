@@ -2,6 +2,7 @@
 orig/
 build/
 theme/panther-*/
+theme/tiger-*/
 theme/jaguar/
 theme/build/
 theme/render/
@@ -18,3 +19,6 @@ vm/ssh/
 .DS_Store
 __pycache__/
 *.pyc
+
+# Apple installers (e.g. the 10.4.11 Combo Update used for the Tiger VM)
+vm/*.dmg

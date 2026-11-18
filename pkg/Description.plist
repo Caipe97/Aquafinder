@@ -7,6 +7,6 @@
 	<key>IFPkgDescriptionVersion</key>
 	<string>__VERSION__</string>
 	<key>IFPkgDescriptionDescription</key>
-	<string>Aqua Finder windows with a slim bottom bar, and Jaguar's pinstriped title bars, logo and Finder icon, for Mac OS X 10.3.9.</string>
+	<string>Aqua Finder windows with the item count under the toolbar, and Jaguar's pinstriped title bars, logo and Finder icon, for Mac OS X 10.3.9 and 10.4.11.</string>
 </dict>
 </plist>
