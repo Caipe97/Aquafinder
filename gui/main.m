@@ -1,4 +1,5 @@
-/* Aquafinder.app: a small Panther (10.3) Cocoa front end for aquafinder.sh.
+/* Aquafinder.app: a small Panther (10.3) Cocoa front end for aquafinder.sh
+ * (it runs on Tiger too).
  *
  * It never touches system files itself. It runs the bundled
  *   sh aquafinder.sh status                     (as the user, to show state)
@@ -96,7 +97,7 @@ static int combine(int acc, int st, BOOL first)
         backing:NSBackingStoreBuffered defer:NO];
     [window setTitle:@"Aquafinder"];
 
-    [self label:@"Make Panther look and fit better on small screens. Changes ask for an administrator password."
+    [self label:@"Make Panther and Tiger look and fit better on small screens. Changes ask for an administrator password."
           frame:NSMakeRect(20, h - 52, 400, 34) gray:NO];
 
     y = h - 84;

@@ -126,6 +126,163 @@ PATCHES = [
     # (plus build_topbar_fix/write_topbar_fix: the sidebar divider's drawing, 20 rows low otherwise)
 ]
 SET_NAMES = ['nometal', 'square', 'statusbar', 'gap', 'shadow', 'softlines', 'slimbar', 'topbar']
+
+# Tiger 10.4.11 (8S165). Its Finder was largely rewritten (C++, HIView), so
+# the 10.3.9 signatures don't find these: they are its own addresses, used
+# only when every expected word matches. Sets not listed aren't ported yet.
+#   - Browser windows get the metal attribute when created (class 6,
+#     attributes 0x1a88095f), and again from TWindow's metal setter (sub_28980:
+#     obj+0x160 ? set 0x100 : clear 0x100, then SetWindowHasRoundedCorners).
+#   - No 'statusbar' set: in an Aqua window the bottom bar is already erased
+#     white (Tiger has no metal branch in its view eraser). No 'slimbar'
+#     either: with 'topbar' there is no bottom bar.
+TIGER_PATCHES = [
+    ('nometal', 0x28040, 0x60a5095f, 0x60a5085f, 'browser window: CreateNewWindow attributes 0x1a88095f -> no metal (0x100)'),
+    ('nometal', 0x289a4, 0x38800100, 0x38800000, 'metal setter: ChangeWindowAttributes(set metal) -> set nothing'),
+    ('square',  0x289d0, 0x38800001, 0x38800000, 'metal setter: SetWindowHasRoundedCorners(1) -> 0'),
+    # The status bar under the toolbar, as in Jaguar: browser windows use the
+    # top bar that windows without a toolbar have ({0, 0, w, 20}), and the
+    # panes start below it and run to the window bottom, where the resize
+    # handle sits in the list's scroll bar corner.
+    ('topbar',  0x28db8, 0x41be005c, 0x4800005c, 'status bar rect: toolbar window -> bottom rect; b top rect'),
+    # 19 rows, under the toolbar's own 1px line: line, 18 stripes ('shadow'), line
+    ('topbar',  0x28e28, 0x3c4041a0, 0x3c404198, 'status bar rect: height 20.0 -> 19.0'),
+    # The panes' split container (sub_2d0f8) was {0, 0, w, h - bar}: always
+    # take the bar's rect and start the container at y = bar height.
+    ('topbar',  0x2d130, 0x801d0164, 0x38400000, 'pane container: li r2,0'),
+    ('topbar',  0x2d134, 0x38400000, 0x90410040, 'pane container: stw r2,x'),
+    ('topbar',  0x2d138, 0x90410044, 0x38610050, 'pane container: addi r3,r1,0x50'),
+    ('topbar',  0x2d13c, 0x90410040, 0x7fa4eb78, 'pane container: mr r4,window'),
+    ('topbar',  0x2d140, 0x2f800001, 0x4bffbc3d, 'pane container: bl status bar rect (empty if hidden)'),
+    ('topbar',  0x2d144, 0x41be0020, 0xc1a1005c, 'pane container: lfs f13,bar height'),
+    ('topbar',  0x2d148, 0x38610050, 0xc001004c, 'pane container: lfs f0,height'),
+    ('topbar',  0x2d14c, 0x7fa4eb78, 0xec006828, 'pane container: fsubs f0,f0,f13'),
+    ('topbar',  0x2d150, 0x4bffbc2d, 0xd001004c, 'pane container: height -= bar height'),
+    ('topbar',  0x2d154, 0xc001004c, 0xd1a10044, 'pane container: y = bar height'),
+    ('topbar',  0x2d158, 0xc1a1005c, NOP,        'pane container: nop'),
+    ('topbar',  0x2d15c, 0xec006828, NOP,        'pane container: nop'),
+    ('topbar',  0x2d160, 0xd001004c, NOP,        'pane container: nop'),
+    # The bar's HIView layout bindings in a toolbar window: top and bottom
+    # bound to the window's bottom (kind 2), so every resize moved it back
+    # down under the panes; bind them to the top (1) as without a toolbar.
+    ('topbar',  0x2f660, 0x38800002, 0x38800001, 'status bar layout: top binding max -> min'),
+    ('topbar',  0x2f66c, 0x38800002, 0x38800001, 'status bar layout: bottom binding max -> min'),
+    # The bar's Draw fills its background, then draws the 163 gray bottom
+    # line; the fill goes through cave.build_tiger_bar (placed in the free
+    # space at the end of __TEXT) for Jaguar's pinstripes and its top line.
+    ('shadow',  0x42e48, 0x4bffc519, ('bl_cave', 'bar'), 'status bar draw: bl background fill -> bl <bar routine>'),
+    # The sidebar divider, as the column view's (Jaguar's): 13 px wide
+    # instead of 7, drawn by cave.build_tiger_divider (the gradient and the
+    # grip near its bottom) instead of Tiger's dimple, and no pane outlines:
+    # the gradient's own edges are the only lines.
+    ('gap',     0x2d924, 0xc022d488, 0xc022d514, 'splitter: divider width 7.0 -> 13.0 (an existing 13.0f)'),
+    ('gap',     0x3f24c, 0x480000b9, ('bl_cave', 'divider'), 'splitter draw: bl background + DrawDivider (dimple) -> bl <divider routine>'),
+    ('gap',     0x3f29c, 0x480001ad, NOP, 'splitter draw: outline the sidebar -> nothing'),
+    ('gap',     0x3f2ec, 0x4800015d, NOP, 'splitter draw: outline the file pane -> nothing'),
+    # The file pane's margins in the splitter (sub_2d66c(view, pane, f1..f4),
+    # f2 right, f3 top, f4 bottom) left room for its outline: 1 right, 2
+    # bottom. With no outline, its scroll bars run to the window's edges and
+    # the resize handle sits in their corner, as in any Aqua window. (Top 1
+    # stays: the white row under the status bar's line, as Panther's.)
+    ('gap',     0x2d424, 0xc082d454, 0xc082d41c, 'splitter init: file pane bottom margin 2.0 -> 0.0'),
+    ('gap',     0x2d428, 0xfc400890, 0xfc402090, 'splitter init: file pane right margin 1.0 -> 0.0 (fmr f2,f4)'),
+    # The search window's scope bar (Servers, Computer, ...; sub_1a7c54) was
+    # black at 10% over white (229) above its 138 bottom line: the same
+    # pinstripes as the status bar instead (the bar routine stripes all rows
+    # above the view's bottom one, where the line still goes).
+    ('shadow',  0x1a7c98, 0x4be979c9, 0x7f63db78, 'scope bar draw: mr r3,view'),
+    ('shadow',  0x1a7c9c, 0x7fa3eb78, 0x7f84e378, 'scope bar draw: mr r4,ctx'),
+    ('shadow',  0x1a7ca0, 0x7f64db78, ('bl_cave', 'bar'), 'scope bar draw: 10% black fill -> bl <bar routine>'),
+    ('shadow',  0x1a7ca4, 0x4be6c0a5, 0x3c400032, 'scope bar draw: lis r2,0x32'),
+    ('shadow',  0x1a7ca8, 0x7f83e378, 0xc3e2d434, 'scope bar draw: lfs f31,1.0 (used by the line below)'),
+    ('shadow',  0x1a7cac, 0x3c400032, NOP,        'scope bar draw: nop'),
+    ('shadow',  0x1a7cb0, 0x7c9d84aa, NOP,        'scope bar draw: nop'),
+    ('shadow',  0x1a7cb4, 0xc3e2d434, NOP,        'scope bar draw: nop'),
+    ('shadow',  0x1a7cb8, 0x4804b709, NOP,        'scope bar draw: nop'),
+    # Lighter 1px lines, 212 as Jaguar's pane borders (cave.build_tiger_line's
+    # RGBA gray): the scope bar's (and its sibling view's, sub_1a8bb8) bottom
+    # line, 138 -> 212, and the frame the search window's path pane strokes
+    # (sub_1b8484; its top edge is the line above the pane), 158 -> 212.
+    ('softlines', 0x1a7cc4, 0xc002d5a4, ('lfs_cave', 'line'), 'scope bar line gray 0.54 -> 212/255'),
+    ('softlines', 0x1a8bc4, 0xc002d5a4, ('lfs_cave', 'line'), 'bar line gray 0.54 -> 212/255'),
+    ('softlines', 0x1b85d0, 0x3884d288, ('addi_cave', 'line'), 'path pane frame: stroke color 158 gray -> 212 (RGBA)'),
+]
+TIGER_SET_NAMES = ['nometal', 'square', 'topbar', 'shadow', 'gap', 'softlines']
+
+
+def is_tiger(m):
+    for _, addr, expect, _, _ in TIGER_PATCHES:
+        off = m.addr2off(addr)
+        if off is None or struct.unpack_from('>I', m.data, off)[0] != expect:
+            return False
+    return True
+
+
+def place_tiger_cave(m, data, names, quiet):
+    """Write the routines of the sets in `names` ('shadow': cave.build_tiger_bar,
+    'gap': cave.build_tiger_divider; 'softlines': cave.build_tiger_line, its
+    constants only) into the free space at the end of __TEXT, one after the
+    other; returns {'bar': entry, 'divider': entry, 'line': RGBA gray,
+    'line_gray': float gray}."""
+    import cave
+    last = max(x['addr'] + x['size'] for x in m.sections if x['seg'] == '__TEXT')
+    seg = [x for x in m.segments if x['name'] == '__TEXT'][0]
+    end = seg['vmaddr'] + seg['filesize']
+    stubs = {nm: stub_addr(m, nm) for nm in cave.TIGER_BAR_STUBS}
+    caddr, entries = (last + 15) & ~15, {}
+    for key, setname, build in (('bar', 'shadow', cave.build_tiger_bar),
+                                ('divider', 'gap', cave.build_tiger_divider),
+                                ('line', 'softlines', cave.build_tiger_line)):
+        if setname not in names:
+            continue
+        code, entries[key], *data_addr = build(caddr, stubs)
+        if data_addr:
+            entries[key + '_gray'] = data_addr[0]
+        coff = m.addr2off(caddr)
+        if len(code) > end - caddr:
+            sys.exit('%s routine (%d bytes) does not fit in __TEXT padding (%d)' % (key, len(code), end - caddr))
+        if any(data[coff:coff + len(code)]):
+            sys.exit('__TEXT padding at %08x is not empty' % caddr)
+        data[coff:coff + len(code)] = code
+        if not quiet:
+            print('cave      %08x file+%06x  %d bytes (%s at %08x), %d free' % (
+                caddr, coff, len(code), key, entries[key], end - caddr - len(code)))
+        caddr = (caddr + len(code) + 15) & ~15
+    return entries
+
+
+def apply_tiger(m, path_out, names, quiet):
+    data = bytearray(m.data)
+    entries = place_tiger_cave(m, data, names, quiet)
+    for name, addr, expect, new, why in TIGER_PATCHES:
+        if name not in names:
+            continue
+        off = m.addr2off(addr)
+        if isinstance(new, tuple) and new[0] == 'bl_cave':
+            new = 0x48000001 | ((entries[new[1]] - addr) & 0x03fffffc)
+        elif isinstance(new, tuple) and new[0] == 'cave_ptr':   # a pointer (vtable slot)
+            new = entries[new[1]]
+        elif isinstance(new, tuple) and new[0] == 'addi_cave':  # addi rX,rX,lo after lis rX,0x32
+            disp = entries[new[1]] - 0x320000
+            assert -0x8000 <= disp < 0x8000
+            new = (expect & 0xffff0000) | (disp & 0xffff)
+        elif isinstance(new, tuple) and new[0] == 'lfs_cave':   # lfs fX,lo(rB), rB = 0x320000
+            disp = entries[new[1] + '_gray'] - 0x320000
+            assert -0x8000 <= disp < 0x8000
+            new = (expect & 0xffff0000) | (disp & 0xffff)
+        struct.pack_into('>I', data, off, new)
+        if not quiet:
+            print('%-9s %08x file+%06x  %08x -> %08x  %s' % (name, addr, off, expect, new, why))
+    # 'statusbar' and 'slimbar' have nothing to do in Tiger (no metal branch
+    # in its eraser; with 'topbar' there is no bottom bar to slim)
+    todo = [n for n in names if n not in TIGER_SET_NAMES and n not in ('statusbar', 'slimbar')]
+    # (every set is ported now; this only reports a set name it doesn't know)
+    if todo and not quiet:
+        print('Tiger 10.4.11: not ported yet, skipped: %s' % ', '.join(todo))
+    open(path_out, 'wb').write(bytes(data))
+    return {}
+
+
 SETS = {n: {p[1]: p for p in PATCHES if p[0] == n} for n in SET_NAMES}
 
 # Framed-box painter's metal fill section (QuickDraw erase inside a CG bracket,
@@ -365,7 +522,10 @@ def write_topbar_fix(m, data, fix, quiet):
 
 
 def apply(path_in, path_out, names=SET_NAMES, quiet=False):
-    ref, m = MachO(REF_PATH), MachO(path_in)
+    m = MachO(path_in)
+    if is_tiger(m):
+        return apply_tiger(m, path_out, names, quiet)
+    ref = MachO(REF_PATH)
     sites = locate(ref, m, names)
     data = bytearray(m.data)
     cv = None

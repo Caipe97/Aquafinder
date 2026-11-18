@@ -1,7 +1,7 @@
 #!/bin/sh
 # Runs before anything is installed. $1 = this package.
 # 112 = fail with message 16; 49 = warn with message 17 (see InstallationCheck.strings).
-[ "$(sw_vers -productVersion 2>/dev/null)" = 10.3.9 ] || exit 112
+case "$(sw_vers -productVersion 2>/dev/null)" in 10.3.9|10.4.11) ;; *) exit 112 ;; esac
 S=$(sh "$1/Contents/Resources/aquafinder.sh" status 2>/dev/null)
 case "$S" in *"not recognised"*) exit 49 ;; esac
 exit 0

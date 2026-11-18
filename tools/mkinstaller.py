@@ -1,5 +1,6 @@
-"""Generate dist/aquafinder.sh: a self-contained Panther shell script that
-installs/restores independent components on an iBook:
+"""Generate dist/aquafinder.sh: a self-contained shell script for Mac OS X
+10.3.9 (Panther) and 10.4.11 (Tiger) that installs/restores independent
+components (files are recognised by fingerprint, so one script serves both):
 
   finder     Aqua (non-brushed-metal) Finder windows with toolbar + sidebar,
              and the status bar under the toolbar (Jaguar)
@@ -19,9 +20,12 @@ THEME_PATH = ('/System/Library/Frameworks/Carbon.framework/Versions/A/Frameworks
 APPKIT_PATH = '/System/Library/Frameworks/AppKit.framework/Versions/C/AppKit'
 GRIP_PATH = '/System/Library/CoreServices/Finder.app/Contents/Resources/Finder.rsrc'
 GRIP_SRC = 'orig/Finder.rsrc'                        # 10.3.9 (same as 10.3.4's)
-FINDER_BUILDS = [('10.3.9', 'orig/Finder-10.3.9')]
+FINDER_BUILDS = [('10.3.9', 'orig/Finder-10.3.9'),
+                 ('10.4.11', 'orig/tiger-10.4.11/Finder')]   # 8S165
 APPKIT_SRC = 'orig/appkit/AppKit-10.3.9'             # stock, from the 10.3.9 Combo
 THEME_SRC = 'theme/panther-10.3.9/Extras.rsrc'      # unchanged since 10.3.0 (the Combo doesn't ship it)
+TIGER_APPKIT_SRC = 'orig/tiger-10.4.11/AppKit'       # stock 10.4.11 (8S165)
+TIGER_THEME_SRC = 'theme/tiger-10.4.11/Extras.rsrc'  # stock 10.4.11 (from the 10.4.11 Combo)
 JAGUAR_SRC = 'theme/jaguar/Extras.rsrc'              # from Mac OS X 10.2.8
 CS = '/System/Library/CoreServices/'
 LOGO_FILES = [   # (key, label, installed path, Panther original in orig/logo)
@@ -31,6 +35,13 @@ LOGO_FILES = [   # (key, label, installed path, Panther original in orig/logo)
     ('findericon', 'Finder icon', CS + 'Finder.app/Contents/Resources/Finder.icns', 'panther-Finder.icns'),
     ('findericon', 'Finder icon', CS + 'SystemIcons.bundle/Contents/Resources/FinderIcon.icns', 'panther-Finder.icns'),
     ('dockfinder', 'Dock Finder icon', CS + 'Dock.app/Contents/Resources/finder.png', 'panther-dock-finder.png'),
+    # Tiger 10.4.11: the login panel art is MacOSX.tif (Myriad, 140x24), and
+    # the system Finder icon moved to CoreTypes.bundle (Panther's bytes).
+    # Neither path exists on Panther, nor Panther's MacOSXart.tif / SystemIcons
+    # copies on Tiger: the script skips files that aren't there.
+    ('loginarttiger', 'login panel logo', CS + 'SecurityAgent.app/Contents/Resources/MacOSX.tif', 'tiger-login-MacOSX.tif'),
+    ('loginarttiger', 'login panel logo', CS + 'SecurityAgentPlugins/loginwindow.bundle/Contents/Resources/MacOSX.tif', 'tiger-login-MacOSX.tif'),
+    ('findericon', 'Finder icon', CS + 'CoreTypes.bundle/Contents/Resources/FinderIcon.icns', 'panther-Finder.icns'),
 ]
 THEME_IDS = [2004, 2005, 2267, 4330]                 # title bar caps/stretch, modal caps, toolbar bg
 
@@ -112,23 +123,28 @@ a = open(os.path.join(ROOT, GRIP_SRC), 'rb').read()
 b = grip.build(a)
 entries.append(('grip', 'finderrsrc', 'Finder divider grip', 0, 0, md5(a), md5(b), edit_lines(a, b)))
 
-theme_out = os.path.join(ROOT, 'build', 'Extras-jaguarbars.rsrc')
 import contextlib, io
-with contextlib.redirect_stdout(io.StringIO()):
-    theme.transplant(os.path.join(ROOT, THEME_SRC), os.path.join(ROOT, JAGUAR_SRC), theme_out, THEME_IDS)
-    # loading spinner art 16 -> 13 px (it was sized for the 15 px bottom bar)
-    theme.shrink_frames(theme_out, theme_out, 390, 13, 2)
-    # toolbar background brush -> Jaguar's pinstripes, as the toolbar art above
-    # (the Finder erases the status bar with it)
-    theme.jaguar_toolbar_brush(theme_out, theme_out)
-a, b = open(os.path.join(ROOT, THEME_SRC), 'rb').read(), open(theme_out, 'rb').read()
-entries.append(('titlebars', 'theme', 'Panther theme', 0, 0, md5(a), md5(b), edit_lines(a, b)))
+# Tiger's title bar, toolbar and spinner art is Panther's (byte for byte), so
+# both themes get the same transplant.
+for rel, key, lbl, out in ((THEME_SRC, 'theme', 'Panther theme', 'Extras-jaguarbars.rsrc'),
+                           (TIGER_THEME_SRC, 'themetiger', 'Tiger theme', 'Extras-tiger-jaguarbars.rsrc')):
+    theme_out = os.path.join(ROOT, 'build', out)
+    with contextlib.redirect_stdout(io.StringIO()):
+        theme.transplant(os.path.join(ROOT, rel), os.path.join(ROOT, JAGUAR_SRC), theme_out, THEME_IDS)
+        # loading spinner art 16 -> 13 px (it was sized for the 15 px bottom bar)
+        theme.shrink_frames(theme_out, theme_out, 390, 13, 2)
+        # toolbar background brush -> Jaguar's pinstripes, as the toolbar art above
+        # (the Finder erases the status bar with it)
+        theme.jaguar_toolbar_brush(theme_out, theme_out)
+    a, b = open(os.path.join(ROOT, rel), 'rb').read(), open(theme_out, 'rb').read()
+    entries.append(('titlebars', key, lbl, 0, 0, md5(a), md5(b), edit_lines(a, b)))
 
-src = os.path.join(ROOT, APPKIT_SRC); out = os.path.join(ROOT, 'build', 'AppKit-10.3.9-slim')
-appkit_patch.apply(src, out, quiet=True)
-a, b = open(src, 'rb').read(), open(out, 'rb').read()
-skip, count, mo, mp = text_region(src, a, b)
-entries.append(('appkit', 'appkit1039', 'AppKit 10.3.9', skip, count, mo, mp, edit_lines(a, b)))
+for rel, ver in ((APPKIT_SRC, '10.3.9'), (TIGER_APPKIT_SRC, '10.4.11')):
+    src = os.path.join(ROOT, rel); out = os.path.join(ROOT, 'build', 'AppKit-%s-slim' % ver)
+    appkit_patch.apply(src, out, quiet=True)
+    a, b = open(src, 'rb').read(), open(out, 'rb').read()
+    skip, count, mo, mp = text_region(src, a, b)
+    entries.append(('appkit', 'appkit' + ver.replace('.', ''), 'AppKit ' + ver, skip, count, mo, mp, edit_lines(a, b)))
 
 new_logo = logo.build(); seen = set()   # reuses a/b/src below: keep AppKit's entry above
 for key, lbl, path, src in LOGO_FILES:
@@ -180,7 +196,7 @@ assert ' ' not in ''.join(p for k, l, p, s in LOGO_FILES), 'LOGO_FILES is word-s
 edits = '\n'.join("  %s)\n%s\n    ;;" % (key, e) for c, key, lbl, sk, cn, o, n, e in entries)
 
 script = r'''#!/bin/sh
-# Aquafinder for Mac OS X 10.3.9 (Panther).
+# Aquafinder for Mac OS X 10.3.9 (Panther) and 10.4.11 (Tiger).
 #
 #   finder     Aqua (non-brushed-metal) Finder windows that keep toolbar + sidebar,
 #              the status bar under the toolbar as in Jaguar, and a sidebar divider
@@ -208,6 +224,9 @@ APPKIT="${APPKIT:-__APPKIT__}"
 GRIP="${GRIP:-__GRIP__}"
 BACKUP_DIR="${BACKUP_DIR:-/Library/Aquafinder}"
 OLD_BACKUP_DIR=/Library/PantherSlim   # backups made under the old name
+# Tiger: its Finder draws the sidebar divider itself (no divider image in
+# Finder.rsrc to patch).
+case "$(sw_vers -productVersion 2>/dev/null)" in 10.4*) TIGER=1 ;; *) TIGER= ;; esac
 
 die() { echo "aquafinder: $*" >&2; [ -n "$TMP" ] && rm -f "$TMP"; exit 1; }
 sum() { md5 < "$1" | awk '{print $NF}'; }
@@ -250,7 +269,8 @@ __KNOWN_LOGO__
 identify_grip() {
 __KNOWN_GRIP__
 }
-LOGO_FILES="${LOGO_FILES:-__LOGO_PATHS__}"   # each is a separate file; status/install/restore go through all
+LOGO_FILES="${LOGO_FILES:-__LOGO_PATHS__}"   # each is a separate file; status/install/restore go through
+                                             # those present (Panther and Tiger each have only some)
 
 apply_edits() {
   case "$1" in
@@ -351,22 +371,22 @@ CHANGED=; RC=0
 case "$1" in
   install)
     need_root install
-    want finder    && { install_one "$FINDER" finder || RC=1; install_one "$GRIP" grip || RC=1; }
+    want finder    && { install_one "$FINDER" finder || RC=1; [ -n "$TIGER" ] || install_one "$GRIP" grip || RC=1; }
     want titlebars && { install_one "$THEME" titlebars || RC=1; install_one "$APPKIT" appkit || RC=1; }
-    want logo      && for F in $LOGO_FILES; do install_one "$F" logo || RC=1; done
+    want logo      && for F in $LOGO_FILES; do [ -f "$F" ] || continue; install_one "$F" logo || RC=1; done
     finish ;;
   restore|uninstall)
     need_root restore
-    want finder    && { restore_one "$FINDER" finder || RC=1; restore_one "$GRIP" grip || RC=1; }
+    want finder    && { restore_one "$FINDER" finder || RC=1; [ -n "$TIGER" ] || restore_one "$GRIP" grip || RC=1; }
     want titlebars && { restore_one "$THEME" titlebars || RC=1; restore_one "$APPKIT" appkit || RC=1; }
-    want logo      && for F in $LOGO_FILES; do restore_one "$F" logo || RC=1; done
+    want logo      && for F in $LOGO_FILES; do [ -f "$F" ] || continue; restore_one "$F" logo || RC=1; done
     finish ;;
   status|"")
     status_one "$FINDER" finder
-    status_one "$GRIP" grip
+    [ -n "$TIGER" ] || status_one "$GRIP" grip
     status_one "$THEME" titlebars
     status_one "$APPKIT" appkit
-    for F in $LOGO_FILES; do status_one "$F" logo; done ;;
+    for F in $LOGO_FILES; do [ -f "$F" ] && status_one "$F" logo; done ;;
   *) echo "usage: sudo sh $0 [status|install|restore] [finder|titlebars|logo]"; exit 1 ;;
 esac
 exit $RC

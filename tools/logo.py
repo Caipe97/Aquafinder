@@ -1,5 +1,7 @@
-"""Jaguar-style branding for Panther: the Garamond "Mac OS X" wordmark and
-Jaguar's Finder icon.
+"""Jaguar-style branding for Panther and Tiger: the Garamond "Mac OS X"
+wordmark and Jaguar's Finder icon. Tiger 10.4.11 ships Panther's About This
+Mac art, Finder icons and Dock tile byte for byte; only its login panel art
+differs (Myriad, in the same 140x24 slot, named MacOSX.tif).
 
 Inputs (Apple files, not in the repo; see README), in orig/logo/:
   panther-MacOSX.tif       loginwindow.app  About This Mac logo (apple + Myriad text)
@@ -8,6 +10,7 @@ Inputs (Apple files, not in the repo; see README), in orig/logo/:
   jaguar-MacOSXart.tif     10.2.8 loginwindow.bundle wordmark (Apple Garamond)
   jaguar-Finder.icns       10.2.8 Finder.app icon
   jaguar-dock-finder.png   10.2.8 Dock.app Finder tile
+  tiger-login-MacOSX.tif   10.4.11 SecurityAgent / loginwindow.bundle login panel wordmark
 
 build() returns {name: bytes} for the replacement files.
 """
@@ -114,6 +117,11 @@ def build():
     return {
         'about': _tiff(about_logo()),
         'loginart': _tiff(login_art()),
+        # The same 140x24 slot. aquafinder.sh tells a file's original by its
+        # patched fingerprint, so Tiger's copy must not be byte-identical to
+        # Panther's: 4 zero bytes after the image (TIFF readers go by the
+        # header's offsets and never read them).
+        'loginarttiger': _tiff(login_art()) + bytes(4),
         'findericon': raw('jaguar-Finder.icns'),
         'dockfinder': raw('jaguar-dock-finder.png'),
     }

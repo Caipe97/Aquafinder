@@ -1,5 +1,5 @@
 #!/bin/sh
-# Copy a file into the running Panther VM over SSH and swap it in atomically,
+# Copy a file into the running Panther (or Tiger: VMHOST=tiger-root) VM over SSH and swap it in atomically,
 # keeping the original owner and mode. No reboot, no disk image mounting.
 #   usage: vm-push.sh <local file> [guest path] [--restart-finder]
 #   guest path defaults to the Finder executable; --restart-finder is implied then.
@@ -11,7 +11,7 @@ SRC="$1"; DST="${2:-$FINDER}"; RESTART="$3"
 die() { echo "vm-push: $*" >&2; exit 1; }
 [ -f "$SRC" ] && [ -s "$SRC" ] || die "usage: $0 <local file> [guest path] [--restart-finder]"
 SUM=$(md5 -q "$SRC")
-ssh() { command ssh -F "$ROOT/vm/ssh/config" panther "$@"; }
+ssh() { command ssh -F "$ROOT/vm/ssh/config" "${VMHOST:-panther}" "$@"; }
 
 ssh "cat > /tmp/vm-push.$$" < "$SRC" || die "upload failed"
 ssh "set -e

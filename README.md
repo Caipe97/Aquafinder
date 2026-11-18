@@ -1,6 +1,6 @@
 # Aquafinder
 
-Make Mac OS X 10.3.9 Panther look and fit better on small screens, like 800×600 G3 iBooks.
+Make Mac OS X 10.3.9 Panther and 10.4.11 Tiger look and fit better on small screens, like 800×600 G3 iBooks.
 
 ![Before and after](screens/before-after.png)
 
@@ -16,7 +16,10 @@ Make Mac OS X 10.3.9 Panther look and fit better on small screens, like 800×600
   sidebar and the divider stays at the window's left edge, so you can drag it back out.
 - The sidebar divider redraws cleanly when you drag it or resize the window.
 - In search results, the splitter above the path pane is Panther's Aqua splitter bar: a light
-  gray bar with a three-line grip in its middle, instead of the metal one.
+  gray bar with a three-line grip in its middle, instead of the metal one. (Panther)
+- In Tiger's search window, the bar with Servers, Computer, Home and Others has the same
+  pinstripes as the item count bar, and the lines under it and above the path pane are a
+  lighter gray. (Tiger)
 - A smaller loading spinner (13 px). It comes from the system theme, so it's installed with the
   title bars and every spinner in the system gets the same size.
 
@@ -36,9 +39,20 @@ Make Mac OS X 10.3.9 Panther look and fit better on small screens, like 800×600
 ![Login panel](screens/login.png)
 ![Finder icon](screens/finder-icon.png)
 
+**On Tiger**
+
+The same parts, the same look, from one script. Tiger's Finder was largely rewritten, so its
+changes were found again from scratch; the title bar art, About This Mac logo, Finder icon and
+Dock tile are the same files as Panther's.
+
+| | |
+|---|---|
+| ![Tiger Finder window](screens/tiger-finder-list.png) | ![Tiger search window](screens/tiger-search.png) |
+| A Finder window on Tiger | Tiger's search window |
+
 ## Install
 
-The easy way:
+The easy way, on Panther or Tiger:
 
 1. Copy [`dist/Aquafinder.dmg`](dist/Aquafinder.dmg) to the Mac and open it.
 2. Double-click **Aquafinder.pkg** and follow the installer.
@@ -79,10 +93,11 @@ Then restart. The original files are kept in `/Library/Aquafinder/`.
 
 ## Good to know
 
-- Only works on **Mac OS X 10.3.9**. On anything else the script does nothing.
+- Only works on **Mac OS X 10.3.9** and **10.4.11**. The script recognises each file it patches
+  by its exact contents; anything else (another version, an already modified file) it leaves alone.
 - The script checks every file before it changes it, keeps a backup, and checks the result.
-- It needs nothing beyond a standard Panther install.
-- Tested in QEMU, including with Quartz Extreme on an emulated Radeon 9000.
+- It needs nothing beyond a standard Panther or Tiger install.
+- Tested in QEMU, on Panther including with Quartz Extreme on an emulated Radeon 9000.
 
 ## More screenshots
 
@@ -99,8 +114,9 @@ The `tools/` folder has everything used to build the script: a small PowerPC dis
 the patch definitions (`patch.py`, `appkit_patch.py`, `theme.py`) and helpers for testing in QEMU.
 
 To rebuild `dist/aquafinder.sh`, put your own copies of the Apple files in `orig/` and `theme/`
-(they aren't in this repo). The logo part also reads `orig/logo/` (files from 10.3.9 and 10.2.8,
-listed in `tools/logo.py`) and needs Pillow. Then run:
+(they aren't in this repo): for Tiger, `orig/tiger-10.4.11/` (Finder, AppKit) and
+`theme/tiger-10.4.11/Extras.rsrc`, from 10.4.11 (8S165). The logo part also reads `orig/logo/`
+(files from 10.3.9, 10.4.11 and 10.2.8, listed in `tools/logo.py`) and needs Pillow. Then run:
 
 ```sh
 python3 tools/mkinstaller.py
@@ -114,6 +130,11 @@ tools/mknative.sh 1.0
 ```
 
 It copies `gui/`, `pkg/` and the script over SSH, builds there with `tools/native-build.sh`,
-and fetches `dist/Aquafinder.dmg`. If sudo there needs a password, the build stops and prints the
+and fetches `dist/Aquafinder.dmg`. The same app and package run on Tiger. If sudo there needs a password, the build stops and prints the
 command to run in Terminal on the Mac; then fetch the result with `FETCH_ONLY=1 tools/mknative.sh 1.0`. Both the app and the package run `aquafinder.sh` to do the work,
 so they make the same checks.
+
+Tiger's Finder changes are in `TIGER_PATCHES` in `tools/patch.py`, at 10.4.11's own addresses
+(its code is too different for the signature matching used for Panther builds), with the new
+drawing code in `tools/cave.py`. `tools/vm-push.sh` takes `VMHOST=tiger-root` to swap a file into
+a running Tiger VM.
