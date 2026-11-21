@@ -385,6 +385,66 @@ def build_cgrect_port(addr, cg_rect_fn, stubs):
 CGRECT_STUBS = ['_GetPort', '_GetPortBounds']
 
 
+# Browser windows (TFileViewerWindow) draw their status bar only when it's
+# laid out, resized or shown, never on an update: in a metal window the
+# window's own background under it hid that. In an Aqua window an update
+# erases it white for good -- e.g. a window shown while the display sleeps,
+# whose first update comes after Show drew the bar. The sidebar splitter
+# (TSidebarSplitter, which holds the sidebar and the file pane) draws on
+# every update of the panes, so its DrawSelf ends in build_splitter_bar:
+# if the port is a browser window's, its bar is drawn too.
+BAR_FIELD = 0x1f4              # TFileViewerWindow: its status bar (or 0)
+BAR_HIDDEN_FIELD = 0x248       # TFileViewerWindow: 1 when the bar is hidden (Show skips it)
+SPLITTER_BAR_STUBS = ['_GetPort', '_GetWindowFromPort', '_GetWRefCon']
+
+
+def build_splitter_bar(addr, tail, vptr, bar_draw, stubs):
+    """Two pieces (the free spaces are small): (head at addr, tail at tail).
+    Entered by a branch from the splitter's DrawSelf epilogue (its frame
+    gone, LR = its caller): if the current port's window is a browser window
+    (LWindow* in its refcon, as PowerPlant keeps it; vtable vptr) with its
+    status bar shown, bar_draw(bar). Returns to the DrawSelf caller."""
+    r0, r1, r3, r12 = 0, 1, 3, 12
+    t = Asm(tail)
+    t.lwz(r3, BAR_FIELD, r3)         # window->statusBar
+    t.cmpwi(r3, 0)
+    t.beq('out')
+    t.bl(bar_draw)
+    t.label('out')
+    t.addi(r1, r1, 0x50)
+    t.lwz(r0, 8, r1)
+    t.mtlr(r0)
+    t.blr()
+    tail_code, out = t.assemble(), t.labels['out']
+
+    a = Asm(addr)
+    a.mflr(r0)
+    a.stw(r0, 8, r1)
+    a.stwu(r1, -0x50, r1)
+    a.addi(r3, r1, 0x40)             # GetPort(&port)
+    a.bl(stubs['_GetPort'])
+    a.lwz(r3, 0x40, r1)
+    a.bl(stubs['_GetWindowFromPort'])
+    a.cmpwi(r3, 0)
+    a.beq('no')
+    a.bl(stubs['_GetWRefCon'])       # the LWindow
+    a.cmpwi(r3, 0)
+    a.beq('no')
+    a.lwz(r0, 0, r3)                 # a TFileViewerWindow?
+    a.lis(r12, (vptr + 0x8000) >> 16)
+    lo = vptr & 0xffff
+    a.addi(r12, r12, lo - 0x10000 if lo >= 0x8000 else lo)
+    a.cmpw(r0, r12)
+    a.bne('no')
+    a.lwz(r0, BAR_HIDDEN_FIELD, r3)  # its bar shown?
+    a.cmpwi(r0, 1)
+    a.beq('no')
+    a.b(tail)
+    a.label('no')                    # (the tail is out of a conditional branch's reach)
+    a.b(out)
+    return a.assemble(), tail_code
+
+
 # Tiger 10.4.11 (patch.py TIGER_PATCHES 'shadow'): the status bar view's Draw
 # (vtable slot 0xe4, sub_42de4) calls its background fill sub_3f360(view, ctx)
 # (transparent: the window's white shows), then draws a 1px gray line (163)

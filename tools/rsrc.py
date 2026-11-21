@@ -40,12 +40,31 @@ class ResFile:
         at the end of the data section, so every existing resource keeps its
         offset and only the header and the map (rebuilt after it) change."""
         assert (rtype, rid) not in self.res, '%s %d exists' % (rtype, rid)
+        return self._appended({(rtype, rid): (name, new)})
+
+    def with_replaced(self, changes):
+        """Return the file bytes with resources' data replaced by new data of
+        any length, appended at the end of the data section the same way
+        (the old data stays in place, unreferenced). changes: {(type, id): bytes}"""
+        for key in changes:
+            assert key in self.res, '%s %d missing' % key
+        return self._appended({k: (self.res[k]['name'], v) for k, v in changes.items()})
+
+    def _appended(self, new_data):
+        """new_data: {(type, id): (name, bytes)}, existing or new resources."""
         doff = struct.unpack_from('>I', self.raw, 0)[0]
         moff, dlen = struct.unpack_from('>I', self.raw, 4)[0], struct.unpack_from('>I', self.raw, 8)[0]
         assert doff + dlen <= moff
         data_end = doff + dlen
         items = [(k, dict(r, roff=r['offset'] - 4 - doff)) for k, r in self.res.items()]
-        items.append(((rtype, rid), dict(name=name, attrs=0, roff=dlen)))
+        tail = b''
+        for key, (name, data) in new_data.items():
+            ent = dict(name=name, attrs=self.res[key]['attrs'] if key in self.res else 0, roff=dlen + len(tail))
+            if key in self.res:
+                items = [(k, ent if k == key else r) for k, r in items]
+            else:
+                items.append((key, ent))
+            tail += struct.pack('>I', len(data)) + data
         bytypes = OrderedDict()
         for (t, i), r in items: bytypes.setdefault(t, []).append((i, r))
         names = bytearray(); reflists = []
@@ -64,10 +83,10 @@ class ResFile:
         for t, refs in reflists:
             tl += struct.pack('>4sHH', t.encode('mac_roman'), len(refs) - 1, ref_base + len(refblob))
             for r in refs: refblob += r
-        body = self.raw[:data_end] + struct.pack('>I', len(new)) + new
+        body = self.raw[:data_end] + tail
         mapb = bytearray(28) + tl + refblob + names
         struct.pack_into('>HHH', mapb, 22, self.attrs, 28, 28 + len(tl) + len(refblob))
-        hdr = struct.pack('>4I', doff, len(body), dlen + 4 + len(new), len(mapb))
+        hdr = struct.pack('>4I', doff, len(body), dlen + len(tail), len(mapb))
         struct.pack_into('>4I', mapb, 0, *struct.unpack('>4I', hdr))
         return hdr + body[16:] + bytes(mapb)
 

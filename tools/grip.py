@@ -10,7 +10,9 @@ measured from a column view divider on a running Panther Finder. The new PNG
 is padded to the original's exact length, so the resource file is edited in
 place.
 
-It also appends the search splitter's bar, 'PNG ' 8801 (see SPLITTER_ID).
+It also appends the search splitter's bar, 'PNG ' 8801 (see SPLITTER_ID),
+and replaces the toolbar's Back, Forward and View buttons with Jaguar's
+(toolbar.py); those are appended too, the originals left unreferenced.
 
 usage: grip.py <Finder.rsrc> <out.rsrc> [divider.png [splitter.png]]
 """
@@ -100,15 +102,21 @@ def divider_png(like):
 
 
 def build(finder_rsrc):
-    """Finder.rsrc bytes with the grip replaced (same length)."""
+    """Finder.rsrc bytes with the grip replaced (in place), the splitter bar
+    added and the toolbar buttons replaced (both appended)."""
+    import toolbar
     rf = ResFile(finder_rsrc)
     like = rf.res[('PNG ', GRIP_ID)]['data']
     png = divider_png(like)
     bar = splitter_png(like)
+    buttons = {('PNG ', i): b for i, b in toolbar.build(finder_rsrc).items()}
     out = ResFile(rf.patched_in_place({('PNG ', GRIP_ID): png})).with_added('PNG ', SPLITTER_ID, SPLITTER_NAME, bar)
+    out = ResFile(out).with_replaced(buttons)
     new = ResFile(out)
     assert new.res[('PNG ', GRIP_ID)]['data'] == png and new.res[('PNG ', SPLITTER_ID)]['data'] == bar
-    assert all(new.res[k]['data'] == r['data'] for k, r in rf.res.items() if k != ('PNG ', GRIP_ID))
+    assert all(new.res[k]['data'] == b for k, b in buttons.items())
+    assert all(new.res[k]['data'] == r['data'] and new.res[k]['name'] == r['name']
+               for k, r in rf.res.items() if k != ('PNG ', GRIP_ID) and k not in buttons)
     return out
 
 

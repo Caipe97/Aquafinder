@@ -121,7 +121,7 @@ for ver, rel in FINDER_BUILDS:
 # divider instead of the metal dimple (installed and restored with the Finder).
 a = open(os.path.join(ROOT, GRIP_SRC), 'rb').read()
 b = grip.build(a)
-entries.append(('grip', 'finderrsrc', 'Finder divider grip', 0, 0, md5(a), md5(b), edit_lines(a, b)))
+entries.append(('grip', 'finderrsrc', 'Finder images', 0, 0, md5(a), md5(b), edit_lines(a, b)))
 
 import contextlib, io
 # Tiger's title bar, toolbar and spinner art is Panther's (byte for byte), so

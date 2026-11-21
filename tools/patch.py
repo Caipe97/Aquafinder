@@ -124,8 +124,14 @@ PATCHES = [
     # without a toolbar, so the scroll bar stops above the handle.
     ('topbar', 0x3cd50, 0x809f02bc, 0x38800000, 'icon view scroller: reclaim corner = has toolbar -> 0'),
     # (plus build_topbar_fix/write_topbar_fix: the sidebar divider's drawing, 20 rows low otherwise)
+    # The Action and Path toolbar items are 50 px wide (their min/max size
+    # functions), but draw their 46 px image at x = 0, so 4 empty columns
+    # followed each: 13 px to the next item instead of the 9 everywhere else.
+    # With the capsule buttons (toolbar.py) that showed; size them to their image.
+    ('toolbar', 0x2bf0c, 0x3c404248, 0x3c404238, 'toolbar item size: width 50.0 -> 46.0 (min and max)'),
+    ('toolbar', 0x103284, 0x3c404248, 0x3c404238, 'toolbar item size: width 50.0 -> 46.0 (min and max)'),
 ]
-SET_NAMES = ['nometal', 'square', 'statusbar', 'gap', 'shadow', 'softlines', 'slimbar', 'topbar']
+SET_NAMES = ['nometal', 'square', 'statusbar', 'gap', 'shadow', 'softlines', 'slimbar', 'topbar', 'toolbar', 'barupdate']
 
 # Tiger 10.4.11 (8S165). Its Finder was largely rewritten (C++, HIView), so
 # the 10.3.9 signatures don't find these: they are its own addresses, used
@@ -319,6 +325,18 @@ CGRECT_PORT_CALLERS = [0x207e0,   # pane border lines, drawn by the divider
 BOTTOMBAR_DEAD = (0x2ae14, 0x2ae70)   # after 'topbar's b at 0x2ae10, up to the top rect
 TOPBAR_ANCHORS = [CGRECT_STWU, CGRECT_TOP, BOTTOMBAR_DEAD[0]] + CGRECT_PORT_CALLERS
 
+# 'barupdate': browser windows draw their status bar on updates too, from
+# the end of the sidebar splitter's DrawSelf (cave.build_splitter_bar; its
+# head after the splitter bar draw, so it needs 'gap', its tail after the
+# bar routine at the end of __TEXT, so it needs 'shadow').
+SPLITTER_DRAWSELF_END = 0x225e8   # TSidebarSplitter::DrawSelf: its final blr
+SHOW_BAR_LOAD = 0x52498        # Show: lwz r3,0x1f4(r31) (window->statusBar), after ShowSelf
+SHOW_BAR_HIDDEN = 0x524a4      # Show: lwz r0,0x248(r31) (1: bar hidden)
+SHOW_BAR_DRAW = 0x524c0        # Show: b BAR_DRAW
+BAR_DRAW = 0x21c8c             # the status bar's draw
+BARUPDATE_ANCHORS = [SPLITTER_DRAWSELF_END, SHOW_BAR_LOAD, SHOW_BAR_HIDDEN, SHOW_BAR_DRAW, BAR_DRAW]
+BROWSER_WINDOW_CLASS = b'17TFileViewerWindow'
+
 REF_PATH = __file__.rsplit('/', 2)[0] + '/orig/Finder-10.3.9'
 
 
@@ -344,6 +362,8 @@ def locate(ref, target, names=None):
     anchors = [p[1] for p in PATCHES if names is None or p[0] in names] + DIVIDER_ANCHORS
     if names is None or 'topbar' in names:
         anchors += TOPBAR_ANCHORS
+    if names is None or 'barupdate' in names:
+        anchors += BARUPDATE_ANCHORS
     if ref.data == target.data:
         return {a: a for a in anchors}
     rs, rw = text_words(ref)
@@ -396,7 +416,8 @@ def place_cave(m, data, hook, quiet):
     if not quiet:
         print('cave      %08x file+%06x  %d bytes (routine + grays), %d free' % (
             caddr, coff, len(code), room - len(code)))
-    return dict(grays, addr=caddr)
+    tail = (caddr + len(code) + 15) & ~15
+    return dict(grays, addr=caddr, free=(tail, seg['vmaddr'] + seg['filesize']))
 
 
 def bl_target(data, m, a):
@@ -468,6 +489,7 @@ def place_divider(m, data, sites, quiet, cg_entry=None):
             rid, m.addr2off(rid), grip.SPLITTER_ID, grip.GRIP_ID))
         print('divider   %08x file+%06x  %d bytes (splitter bar draw) in the framed box\'s grip draw, %d free' % (
             loaded, m.addr2off(loaded), len(bar), drawn - loaded - len(bar)))
+    free = (loaded + len(bar) + 15) & ~15, drawn
     if cg_entry:
         hook = sites[DIVIDER_CGRECT_CALL]
         hw = w2(data, m, hook)
@@ -476,10 +498,71 @@ def place_divider(m, data, sites, quiet, cg_entry=None):
         if not quiet:
             print('topbar    %08x file+%06x  %08x -> bl %08x  divider draw: QD->CG rect -> port-rect entry' % (
                 hook, m.addr2off(hook), hw, cg_entry))
+    return free
 
 
 def w2(data, m, a):
     return struct.unpack_from('>I', data, m.addr2off(a))[0]
+
+
+def vtables_of(m, class_name):
+    """Primary vtable addresses (as stored in objects: the first function
+    slot) of the class whose mangled name is class_name: typeinfo name
+    string -> typeinfo -> vtable (offset to top 0)."""
+    d = m.data
+    def words(value):
+        out = []
+        for s in m.sections:
+            if s['seg'] == '__DATA' and s['offset'] and s['type'] in (0, 11):
+                for k in range(0, s['size'] - 3, 4):
+                    if struct.unpack_from('>I', d, s['offset'] + k)[0] == value:
+                        out.append(s['addr'] + k)
+        return out
+    out, i = [], d.find(class_name + b'\0')
+    while i >= 0:
+        if d[i - 1:i] == b'\0':
+            for ti in [a - 4 for a in words(m.off2addr(i))]:
+                out += [v + 4 for v in words(ti) if struct.unpack_from('>i', d, m.addr2off(v - 4))[0] == 0]
+        i = d.find(class_name + b'\0', i + 1)
+    return out
+
+
+def place_barupdate(m, data, sites, free, tail, quiet):
+    """The splitter DrawSelf's blr -> b cave.build_splitter_bar (see
+    SPLITTER_DRAWSELF_END). free: (start, end) after the splitter bar draw;
+    tail: (start, end) after the bar routine."""
+    import cave
+    end, bar_draw = sites[SPLITTER_DRAWSELF_END], sites[BAR_DRAW]
+    assert w2(data, m, end) == 0x4e800020 and w2(data, m, end - 4) == 0xcbe1fff8, 'unexpected splitter DrawSelf epilogue'
+    assert w2(data, m, sites[SHOW_BAR_LOAD]) == 0x807f0000 | cave.BAR_FIELD, 'window->statusBar is elsewhere'
+    assert w2(data, m, sites[SHOW_BAR_HIDDEN]) == 0x801f0000 | cave.BAR_HIDDEN_FIELD, 'bar hidden flag is elsewhere'
+    assert bl_target_any(data, m, sites[SHOW_BAR_DRAW]) == bar_draw, 'Show does not draw the bar'
+    vt = vtables_of(m, BROWSER_WINDOW_CLASS)
+    assert len(vt) == 1, 'browser window vtable: %d found' % len(vt)
+    head, tl = cave.build_splitter_bar(free[0], tail[0], vt[0], bar_draw,
+                                       {nm: stub_addr(m, nm) for nm in cave.SPLITTER_BAR_STUBS})
+    assert free[0] + len(head) <= free[1] and tail[0] + len(tl) <= tail[1], 'splitter bar draw does not fit'
+    toff = m.addr2off(tail[0])
+    if any(data[toff:toff + len(tl)]):
+        sys.exit('__TEXT padding at %08x is not empty' % tail[0])
+    for at, code in ((free[0], head), (tail[0], tl)):
+        data[m.addr2off(at):m.addr2off(at) + len(code)] = code
+    struct.pack_into('>I', data, m.addr2off(end), 0x48000000 | ((free[0] - end) & 0x03fffffc))
+    if not quiet:
+        print('barupdate %08x file+%06x  %d bytes (browser window? its status bar), %d free' % (
+            free[0], m.addr2off(free[0]), len(head), free[1] - free[0] - len(head)))
+        print('barupdate %08x file+%06x  %d bytes (the bar draw), %d free' % (
+            tail[0], m.addr2off(tail[0]), len(tl), tail[1] - tail[0] - len(tl)))
+        print('barupdate %08x file+%06x  4e800020 -> b %08x  splitter DrawSelf: blr -> draw the bar too' % (
+            end, m.addr2off(end), free[0]))
+
+
+def bl_target_any(data, m, a):
+    w = w2(data, m, a)
+    assert w >> 26 == 18, 'expected a branch at %08x' % a
+    disp = w & 0x03fffffc
+    if disp & 0x02000000: disp -= 0x04000000
+    return a + disp
 
 
 def build_topbar_fix(m, data, sites):
@@ -538,7 +621,11 @@ def apply(path_in, path_out, names=SET_NAMES, quiet=False):
     if 'gap' in names:
         assert 'statusbar' in names, "'gap' needs 'statusbar' (its helper lives in the dead metal branch)"
         divider = place_divider_erase(m, data, sites, quiet)
-        place_divider(m, data, sites, quiet, cg_entry=fix[1]['port'] if fix else None)
+        free = place_divider(m, data, sites, quiet, cg_entry=fix[1]['port'] if fix else None)
+    if 'barupdate' in names:
+        assert 'gap' in names, "'barupdate' needs 'gap' (it lives after the splitter bar draw)"
+        assert cv, "'barupdate' needs 'shadow' (its tail follows the bar routine)"
+        place_barupdate(m, data, sites, free, cv['free'], quiet)
     for p in PATCHES:
         name, refaddr, expect, action, why = p
         if name not in names:

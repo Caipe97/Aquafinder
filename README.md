@@ -10,7 +10,8 @@ Make Mac OS X 10.3.9 Panther and 10.4.11 Tiger look and fit better on small scre
 - Plain Aqua windows instead of brushed metal. The toolbar and sidebar stay.
 - As in Jaguar, the item count sits under the toolbar, between two thin lines, instead of in a
   bar at the bottom. The sidebar and files run to the bottom of the window, and the resize corner
-  sits in the scroll bar's corner as in any Aqua window.
+  sits in the scroll bar's corner as in any Aqua window. The bar redraws with the window, so it
+  doesn't come up white in a window opened while the display sleeps. (Panther)
 - The sidebar divider looks like the column view's dividers, as in Jaguar: a soft 15 px gray
   gradient with its grip near the bottom, and no other lines around the panes. Collapse the
   sidebar and the divider stays at the window's left edge, so you can drag it back out.
@@ -20,6 +21,10 @@ Make Mac OS X 10.3.9 Panther and 10.4.11 Tiger look and fit better on small scre
 - In Tiger's search window, the bar with Servers, Computer, Home and Others has the same
   pinstripes as the item count bar, and the lines under it and above the path pane are a
   lighter gray. (Tiger)
+- Jaguar's toolbar buttons: round Back and Forward buttons and the capsule-shaped View control,
+  taken from Jaguar's Finder in every state (pressed, selected, inactive, Graphite). The Action
+  (gear) and Path buttons, which Jaguar didn't have, get matching capsules, and every button sits
+  the same 9 px from the next. (Panther)
 - A smaller loading spinner (13 px). It comes from the system theme, so it's installed with the
   title bars and every spinner in the system gets the same size.
 
@@ -116,7 +121,9 @@ the patch definitions (`patch.py`, `appkit_patch.py`, `theme.py`) and helpers fo
 To rebuild `dist/aquafinder.sh`, put your own copies of the Apple files in `orig/` and `theme/`
 (they aren't in this repo): for Tiger, `orig/tiger-10.4.11/` (Finder, AppKit) and
 `theme/tiger-10.4.11/Extras.rsrc`, from 10.4.11 (8S165). The logo part also reads `orig/logo/`
-(files from 10.3.9, 10.4.11 and 10.2.8, listed in `tools/logo.py`) and needs Pillow. Then run:
+(files from 10.3.9, 10.4.11 and 10.2.8, listed in `tools/logo.py`) and needs Pillow. The toolbar
+buttons read Jaguar's Finder art from `orig/jaguar-10.2.8/Finder-Localized.rsrc` (10.2.8's
+`Finder.app/Contents/Resources/English.lproj/Localized.rsrc`; see `tools/toolbar.py`). Then run:
 
 ```sh
 python3 tools/mkinstaller.py
