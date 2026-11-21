@@ -111,7 +111,10 @@ def build(finder_rsrc):
     bar = splitter_png(like)
     buttons = {('PNG ', i): b for i, b in toolbar.build(finder_rsrc).items()}
     out = ResFile(rf.patched_in_place({('PNG ', GRIP_ID): png})).with_added('PNG ', SPLITTER_ID, SPLITTER_NAME, bar)
-    out = ResFile(out).with_replaced(buttons)
+    out = ResFile(out).with_replaced({k: b for k, b in buttons.items() if k in rf.res})
+    for k, b in sorted(buttons.items()):
+        if k not in rf.res:                       # the View control's 6th images (8615-8617)
+            out = ResFile(out).with_added(k[0], k[1], None, b)
     new = ResFile(out)
     assert new.res[('PNG ', GRIP_ID)]['data'] == png and new.res[('PNG ', SPLITTER_ID)]['data'] == bar
     assert all(new.res[k]['data'] == b for k, b in buttons.items())

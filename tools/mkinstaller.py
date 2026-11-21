@@ -136,6 +136,10 @@ for rel, key, lbl, out in ((THEME_SRC, 'theme', 'Panther theme', 'Extras-jaguarb
         # toolbar background brush -> Jaguar's pinstripes, as the toolbar art above
         # (the Finder erases the status bar with it)
         theme.jaguar_toolbar_brush(theme_out, theme_out)
+        # Jaguar's close/minimize/zoom buttons in Aqua title bars (Panther; Tiger's
+        # buttons have more states, not mapped yet)
+        if key == 'theme':
+            theme.jaguar_window_buttons(theme_out, os.path.join(ROOT, JAGUAR_SRC), theme_out)
     a, b = open(os.path.join(ROOT, rel), 'rb').read(), open(theme_out, 'rb').read()
     entries.append(('titlebars', key, lbl, 0, 0, md5(a), md5(b), edit_lines(a, b)))
 

@@ -130,7 +130,33 @@ PATCHES = [
     # With the capsule buttons (toolbar.py) that showed; size them to their image.
     ('toolbar', 0x2bf0c, 0x3c404248, 0x3c404238, 'toolbar item size: width 50.0 -> 46.0 (min and max)'),
     ('toolbar', 0x103284, 0x3c404248, 0x3c404238, 'toolbar item size: width 50.0 -> 46.0 (min and max)'),
+    # Back and Forward: Jaguar's round buttons touched (2 px apart) in their
+    # 26 px slots. Each slot is 28 px now (the images pad their circle on
+    # the outer side, toolbar.py), so they're 6 px apart, and the item is
+    # 56 px. The click goes to Back or Forward by the item's midpoint, so
+    # that follows.
+    ('toolbar', 0x2beb4, 0x3c004250, 0x3c004260, 'Back/Forward item size: width 52.0 -> 56.0'),
+    ('toolbar', 0x526c8, 0x3c0041d0, 0x3c0041e0, 'Back/Forward draw: slot width 26.0 -> 28.0'),
+    # The View control in an inactive window: each segment's image index is
+    # its first + state, and with the window inactive (or the control
+    # disabled) the state is 1 for the selected segment, else 0, the normal
+    # image, drawn as in the active window, while the other items draw
+    # their disabled images, at 50%. A segment now has 6 images (see
+    # place_view_loader): 0 inactive, 1 selected and inactive (both at 50%,
+    # toolbar.py), 2 pressed, 3 selected, 4 selected (Graphite), 5 normal.
+    ('toolbar', 0x25c98, 0x38400000, 0x38400005, 'View image: normal state 0 -> 5 (0: inactive window)'),
 ]
+# 'toolbar' (with place_view_loader): the View control's image loader and
+# the first image id of each segment (VIEW_DRAW_IDS: lis r9,hi; addi r9,r9,lo
+# -> 3 halfwords, read by the draw loop).
+VIEW_LOADER_LAST = 0x4c48c     # the loader's 14th block (li r4,0x21a5 at +0xc); the 15th follows
+VIEW_LOADER_LANDING = 0x4c570  # its exception landing pad, right after the 15th
+VIEW_LOADER_DONE = 0x4c58c     # its epilogue
+VIEW_DRAW_IDS = 0x52824        # View draw: addi r9,r9,-0x5d4 (after lis r9,0x2a at -8)
+VIEW_IDS = (8600, 8605, 8610)
+VIEW_IDS_NEW = (8600, 8606, 8612)
+VIEW_IMAGES = 18
+VIEW_ANCHORS = [VIEW_LOADER_LAST, VIEW_LOADER_LANDING, VIEW_LOADER_DONE, VIEW_DRAW_IDS]
 SET_NAMES = ['nometal', 'square', 'statusbar', 'gap', 'shadow', 'softlines', 'slimbar', 'topbar', 'toolbar', 'barupdate']
 
 # Tiger 10.4.11 (8S165). Its Finder was largely rewritten (C++, HIView), so
@@ -364,6 +390,8 @@ def locate(ref, target, names=None):
         anchors += TOPBAR_ANCHORS
     if names is None or 'barupdate' in names:
         anchors += BARUPDATE_ANCHORS
+    if names is None or 'toolbar' in names:
+        anchors += VIEW_ANCHORS
     if ref.data == target.data:
         return {a: a for a in anchors}
     rs, rw = text_words(ref)
@@ -557,6 +585,36 @@ def place_barupdate(m, data, sites, free, tail, quiet):
             end, m.addr2off(end), free[0]))
 
 
+def place_view_loader(m, data, sites, quiet):
+    """The View control loads VIEW_IMAGES images instead of 15: its last two
+    load blocks become cave.build_view_loader's loop (ids 8613..8617), and
+    the draw's first id per segment goes from VIEW_IDS to VIEW_IDS_NEW."""
+    import cave
+    last, landing, done = sites[VIEW_LOADER_LAST], sites[VIEW_LOADER_LANDING], sites[VIEW_LOADER_DONE]
+    block = [w2(data, m, last + 4 * k) for k in range(29)]
+    nxt = [w2(data, m, last + 0x74 + 4 * k) for k in range(28)]
+    first = VIEW_IDS[0] + 13
+    assert block[3] == 0x38800000 | first and nxt[3] == 0x38800000 | (first + 1), 'unexpected View loader blocks'
+    assert [mask(w) for i, w in enumerate(block[:28]) if i != 3] == [mask(w) for i, w in enumerate(nxt) if i != 3]
+    assert last + 0x74 + 4 * 28 == landing and landing + 0x1c == done, 'View loader has a different layout'
+    code = cave.build_view_loader(last, block, last, VIEW_IDS[0] + VIEW_IMAGES, done, landing)
+    room = landing - last
+    assert len(code) <= room, 'View loader loop does not fit its two blocks'
+    used = len(code)
+    code += struct.pack('>I', NOP) * ((room - used) // 4)
+    data[m.addr2off(last):m.addr2off(landing)] = code
+    hi, lo = w2(data, m, VIEW_DRAW_IDS - 8), w2(data, m, VIEW_DRAW_IDS)
+    assert hi >> 16 == 0x3d20 and lo >> 16 == 0x3929, 'expected lis/addi r9 before the View draw ids'
+    ids = ((hi & 0xffff) << 16) + struct.unpack('>h', struct.pack('>H', lo & 0xffff))[0]
+    off = m.addr2off(ids)
+    assert struct.unpack_from('>3H', data, off) == VIEW_IDS, 'unexpected View draw ids'
+    struct.pack_into('>3H', data, off, *VIEW_IDS_NEW)
+    if not quiet:
+        print('toolbar   %08x file+%06x  %d bytes: View loader blocks 14-15 -> loop over ids %d..%d, %d free' % (
+            last, m.addr2off(last), used, first, VIEW_IDS[0] + VIEW_IMAGES - 1, room - used))
+        print('toolbar   %08x file+%06x  View draw first ids %s -> %s' % (ids, off, VIEW_IDS, VIEW_IDS_NEW))
+
+
 def bl_target_any(data, m, a):
     w = w2(data, m, a)
     assert w >> 26 == 18, 'expected a branch at %08x' % a
@@ -626,6 +684,8 @@ def apply(path_in, path_out, names=SET_NAMES, quiet=False):
         assert 'gap' in names, "'barupdate' needs 'gap' (it lives after the splitter bar draw)"
         assert cv, "'barupdate' needs 'shadow' (its tail follows the bar routine)"
         place_barupdate(m, data, sites, free, cv['free'], quiet)
+    if 'toolbar' in names:
+        place_view_loader(m, data, sites, quiet)
     for p in PATCHES:
         name, refaddr, expect, action, why = p
         if name not in names:

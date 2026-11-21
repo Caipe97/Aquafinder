@@ -88,6 +88,7 @@ class Asm:
     def beq(self, t): self._br('bc', t, 12, 30)   # cr7 eq set
     def bne(self, t): self._br('bc', t, 4, 30)    # cr7 eq clear
     def bge(self, t): self._br('bc', t, 4, 28)    # cr7 lt clear
+    def blt(self, t): self._br('bc', t, 12, 28)   # cr7 lt set
     def ble(self, t): self._br('bc', t, 4, 29)    # cr7 gt clear
 
     def data(self, bs):
@@ -669,3 +670,52 @@ def build_tiger_line(cave, stubs, gray=BAR_LINE):
     address of the float gray: the same)."""
     g = gray / 255.0
     return struct.pack('>4f', g, g, g, 1.0), cave, cave
+
+
+# The View control's image loader (Panther 'toolbar', see patch.py
+# place_view_loader): 15 copies of one block, each loading 'PNG ' <id> into
+# the control's image vector (operator new, GetResource, the image's
+# constructor, push_back). Its last two blocks become a loop over the ids
+# from that of the first of them up to `end` (exclusive), so the vector gets
+# 18 images: 6 per segment instead of 5. The counter lives at 0x3c(r1), a
+# free word of the loader's frame (its locals are 0x40..0x4f).
+VIEW_LOADER_COUNTER = 0x3c
+
+
+def build_view_loader(addr, block, block_addr, end, done, landing):
+    """block: the words of the original block at block_addr (29: the last
+    one has no landing pad word, so the one before it is passed); done: the
+    epilogue; landing: the shared exception landing pad. Returns code to be
+    written at addr (= block_addr)."""
+    assert len(block) == 29 and block[3] >> 16 == 0x3880, 'expected li r4,<id> in the block'
+    first = block[3] & 0xffff
+    a = Asm(addr)
+    a.li(0, first)
+    a.stw(0, VIEW_LOADER_COUNTER, 1)
+    a.label('body')
+    for k, w in enumerate(block):
+        src = block_addr + 4 * k
+        if k == 3:
+            a.lwz(4, VIEW_LOADER_COUNTER, 1)              # li r4,<id> -> the counter
+        elif w >> 26 == 18:                               # b/bl: same target from here
+            disp = w & 0x03fffffc
+            if disp & 0x02000000: disp -= 0x04000000
+            target = src + disp
+            if k == 28:
+                target = landing
+            if not (block_addr <= target <= block_addr + 4 * 29):   # the block's own exits (to the next block) reach 'next'
+                (a.bl if w & 1 else a.b)(target)
+            else:
+                a.emit(w)
+        else:
+            a.emit(w)                                     # bc's stay inside the block
+    a.label('next')                                       # the block's own exits land here
+    a.lwz(4, VIEW_LOADER_COUNTER, 1)
+    a.addi(4, 4, 1)
+    a.stw(4, VIEW_LOADER_COUNTER, 1)
+    a.cmpwi(4, end)
+    a.blt('body')
+    a.b(done)
+    code = a.assemble()
+    assert a.labels['next'] - a.labels['body'] == 4 * 29
+    return code

@@ -54,6 +54,16 @@ def visible(images, masks):
     return out
 
 
+def encode_mask(m):
+    """1-bit mask image -> pxm# mask rows (rowbytes = 2*ceil(w/16))."""
+    w, ht = m.size; rb = ((w + 15) // 16) * 2
+    mb = bytearray(rb * ht); px = m.load()
+    for y in range(ht):
+        for x in range(w):
+            if px[x, y]: mb[y*rb + x//8] |= 0x80 >> (x % 8)
+    return bytes(mb)
+
+
 def encode(template, images, masks):
     w, ht, n, rb, msize, isize, nmask = _geom(template)
     assert len(images) == n and len(masks) == nmask

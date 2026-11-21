@@ -24,13 +24,16 @@ Make Mac OS X 10.3.9 Panther and 10.4.11 Tiger look and fit better on small scre
 - Jaguar's toolbar buttons: round Back and Forward buttons and the capsule-shaped View control,
   taken from Jaguar's Finder in every state (pressed, selected, inactive, Graphite). The Action
   (gear) and Path buttons, which Jaguar didn't have, get matching capsules, and every button sits
-  the same 9 px from the next. (Panther)
+  the same 9 px from the next. Back and Forward sit 6 px apart, and in an inactive window the View
+  control fades with the other buttons. (Panther)
 - A smaller loading spinner (13 px). It comes from the system theme, so it's installed with the
   title bars and every spinner in the system gets the same size.
 
 **Title bars**
 - Pinstriped title bars from Jaguar (10.2) in every app.
 - Inactive windows get see-through title bars, in both Carbon apps (like the Finder) and Cocoa apps (like TextEdit).
+- Jaguar's close, minimize and zoom buttons: the larger, glossier ones, in Aqua and Graphite,
+  spaced 22 px apart as in Jaguar, in Carbon and Cocoa apps. (Panther)
 
 ![Jaguar title bars: active (top), inactive (bottom)](screens/titlebars.png)
 ![See-through inactive Cocoa window (TextEdit)](screens/cocoa-inactive.png)

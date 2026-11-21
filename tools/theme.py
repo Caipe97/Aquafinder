@@ -111,3 +111,65 @@ def jaguar_toolbar_brush(in_path, out_path, res_id=TOOLBAR_PPAT, rows=JAGUAR_TOO
     data = rf.patched_in_place({key: bytes(d)})
     assert ResFile(data).res[key]['data'] == bytes(d)
     open(out_path, 'wb').write(data)
+
+
+# Jaguar's title bar buttons. Panther draws an Aqua window's close, minimize
+# and zoom buttons from the 14x16 'MetalWindowLarge*' art (pxm# 4690, 4700,
+# 4710; Graphite and its other variant via tdat 2 and 3: 13176-13181);
+# Jaguar drew 'WindowLarge*' (pxm# 200, 210, 220, 19x19; Graphite 10182-10184,
+# the other variant 10161, 10171, 10181), which Panther still carries,
+# unchanged, but no longer uses. Each Panther button gets Jaguar's art at
+# Jaguar's size, in Panther's state order: Panther's close button has one
+# more state (10) than Jaguar's (9), a second dirty-and-inactive one, which
+# takes Jaguar's (its last).
+# Panther spaces the buttons by their art's width + 7 (21 px for its 14 px
+# art); Jaguar's were 22 px apart. So Jaguar's 19 px canvas is cropped to
+# its 15 middle columns (WINDOW_BUTTON_COLS): only the faintest shadow
+# (alpha 14 and less) goes, and the first button's center stays 15 px from
+# the window's edge, as in Jaguar. Panther draws the art's top 4 rows into
+# the title bar, so its top row (alpha 2 at most) goes too, which puts the
+# buttons 1 px lower than Jaguar's instead of 2; its bottom rows (alpha 14
+# and 0) go as well, as nothing shows there.
+WINDOW_BUTTON_COLS = (2, 17)
+WINDOW_BUTTON_ROWS = (1, 17)
+# Panther id -> Jaguar id
+WINDOW_BUTTONS = {4690: 200, 4700: 210, 4710: 220,
+                  13176: 10182, 13178: 10183, 13180: 10184,
+                  13177: 10161, 13179: 10171, 13181: 10181}
+
+
+def jaguar_window_buttons(in_path, src_path, out_path, buttons=WINDOW_BUTTONS, cols=WINDOW_BUTTON_COLS, rows=WINDOW_BUTTON_ROWS):
+    """Replace each Panther button pxm# with the Jaguar one's pixels (its
+    columns cols[0]..cols[1]-1), keeping Panther's state count (extra states
+    repeat Jaguar's last). The
+    new data is longer, so it's appended (rsrc.with_replaced)."""
+    import struct
+    rf = ResFile(open(in_path, 'rb').read())
+    src = ResFile(open(src_path, 'rb').read())
+    changes = {}
+    for pid, jid in buttons.items():
+        p, j = rf.res[('pxm#', pid)]['data'], src.res[('pxm#', jid)]['data']
+        n, jn = pxm.header(p)['count'], pxm.header(j)['count']
+        assert n >= jn, 'pxm# %d: fewer states than Jaguar\'s %d' % (pid, jid)
+        ims, ms = pxm.decode(j)
+        h = pxm.header(j)
+        box = (cols[0], rows[0], cols[1], rows[1])
+        ims, ms = [im.crop(box) for im in ims], [m.crop(box) for m in ms]
+        pick = [min(k, jn - 1) for k in range(n)]
+        head = bytearray(j[:24])
+        top, left, bottom, right = struct.unpack_from('>4h', head, 4)
+        struct.pack_into('>4h', head, 4, top, left, top + rows[1] - rows[0], left + cols[1] - cols[0])
+        struct.pack_into('>H', head, 22, n)
+        out = bytes(head)
+        for m in ([ms[0]] if len(ms) == 1 else [ms[k] for k in pick]):
+            mm = bytearray(pxm.encode_mask(m))
+            out += bytes(mm)
+        for k in pick:
+            out += ims[k].convert('RGBA').tobytes()
+        ni, nm = pxm.decode(out)
+        assert len(ni) == n and all(ni[k].tobytes() == ims[pick[k]].tobytes() for k in range(n))
+        changes[('pxm#', pid)] = out
+    data = rf.with_replaced(changes)
+    check = ResFile(data)
+    assert all(check.res[k]['data'] == v for k, v in changes.items())
+    open(out_path, 'wb').write(data)

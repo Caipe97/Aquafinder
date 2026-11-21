@@ -5,8 +5,17 @@ ones.
 Panther 10.3.9 draws each button from a finished PNG in Finder.rsrc
 (button and symbol together, one per state): 'PNG ' 8900-8907 for Back and
 Forward, 8600-8614 for the View control's three segments, each drawn into a
-26x25 slot. (Panther's own Back images are 27 px wide and get squeezed into
-theirs; the new ones are 26, so they draw 1:1.) Jaguar 10.2.8's Finder has the same buttons as PICTs in
+26x25 slot. (Panther's own Back images are 27 px wide and got squeezed into
+theirs.) Here the Back and Forward slots are 28 px (patch.py 'toolbar'):
+each image is Jaguar's 26 px button with 2 clear columns on its outer
+side, so the round buttons are 6 px apart instead of touching.
+
+The View control had 5 images per segment (normal, selected in an inactive
+window, pressed, selected, selected in Graphite) and drew the normal one in
+an inactive window too, fully opaque, where the other items draw their
+disabled images at 50%. patch.py 'toolbar' makes that 6 per segment, ids
+8600-8605, 8606-8611 and 8612-8617 (VIEW_STATES): Jaguar's inactive-window
+images, at 50% like the rest, come first. Jaguar 10.2.8's Finder has the same buttons as PICTs in
 English.lproj/Localized.rsrc:
 
   7600 / 7610      Back / Forward mask (black = opaque)
@@ -37,7 +46,7 @@ Input (an Apple file, not in the repo): orig/jaguar-10.2.8/Finder-Localized.rsrc
 /System/Library/CoreServices/Finder.app/Contents/Resources/English.lproj/Localized.rsrc
 from 10.2.8.
 
-build(finder_rsrc) -> {Panther 'PNG ' id: new PNG bytes}
+build(finder_rsrc) -> {'PNG ' id: new PNG bytes} (8615-8617 are new)
 """
 import os, sys, struct, zlib, io
 sys.path.insert(0, os.path.dirname(__file__))
@@ -53,14 +62,18 @@ ARROWS = {
     8900: (7607, 7600), 8901: (7601, 7600), 8902: (7602, 7606), 8903: (7609, 7600),   # Back
     8904: (7615, 7610), 8905: (7611, 7610), 8906: (7612, 7614), 8907: (7618, 7610),   # Forward
 }
-# Panther View segment ids: normal, inactive, pressed, selected, graphite (selected).
-# Panther's 'inactive' is the selected segment in an inactive window.
-SEGMENTS = [   # (Panther first id, Jaguar base, Jaguar graphite selected, mask, columns)
+ARROW_SLOT = 28                           # Back/Forward slot width (patch.py 'toolbar': 26 in Panther)
+# View segment images, 6 per segment (patch.py 'toolbar'), in state order:
+# inactive window, selected in an inactive window, pressed, selected,
+# selected (Graphite), normal. 'G' = the Jaguar Graphite selected image;
+# a number = Jaguar base + that. The first two are drawn at 50%.
+VIEW_STATES = [3, 6, 2, 4, 'G', 1]
+VIEW_HALF = (0, 1)
+SEGMENTS = [   # (first id, Jaguar base, Jaguar graphite selected, mask, columns)
     (8600, 6910, 6930, 6910, (1, 27)),    # Icon
-    (8605, 6900, 6932, 6900, (27, 49)),   # List
-    (8610, 6920, 6934, 6920, (49, 75)),   # Column
+    (8606, 6900, 6932, 6900, (27, 49)),   # List
+    (8612, 6920, 6934, 6920, (49, 75)),   # Column
 ]
-SEGMENT_STATES = [1, 6, 2, 4]             # + base, in Panther's order (graphite last)
 ROWS = (0, 25)                            # 24 rows of art over a clear top row, bottoms aligned
 LIST_WIDEN = (28, 47)                     # plain columns beside the List segment's dividers, each repeated twice
 
@@ -188,14 +201,21 @@ def images():
     """{Panther id: RGBA image}"""
     j = _jaguar(); out = {}
     for pid, (img, msk) in ARROWS.items():
-        # the circle (columns 2-25) centered in the 26 px slot
-        out[pid] = _rgba(j(img), j(msk), (1, ROWS[0], 27, ROWS[1]))
+        # the circle (columns 2-25, centered in 26), padded on its outer side:
+        # Back's right, Forward's left
+        im = _rgba(j(img), j(msk), (1, ROWS[0], 27, ROWS[1]))
+        slot = Image.new('RGBA', (ARROW_SLOT, im.height))
+        slot.paste(im, (0 if pid < 8904 else ARROW_SLOT - im.width, 0))
+        out[pid] = slot
     for first, base, graphite, msk, (c0, c1) in SEGMENTS:
-        for k, src in enumerate([base + s for s in SEGMENT_STATES] + [graphite]):
+        for k, st in enumerate(VIEW_STATES):
+            src = graphite if st == 'G' else base + st
             seg = _rgba(j(src), j(msk), (c0, ROWS[0], c1, ROWS[1]))
             if seg.width < 26:
                 seg = _widen(seg, [c - c0 for c in LIST_WIDEN])
             assert seg.size == (26, 25), seg.size
+            if k in VIEW_HALF:
+                seg.putalpha(seg.getchannel('A').point(lambda v: (v + 1) // 2))
             out[first + k] = seg
     for kind in (GEAR, PATH):
         for k, (ids, disabled) in enumerate(CAPSULE_STATES):
@@ -206,7 +226,7 @@ def images():
 def build(finder_rsrc):
     rf = ResFile(finder_rsrc); out = {}
     for pid, im in images().items():
-        like = rf.res[('PNG ', pid)]['data']
+        like = rf.res.get(('PNG ', pid), rf.res[('PNG ', SEGMENTS[0][0])])['data']   # new ids: like 8600
         assert Image.open(io.BytesIO(like)).height == im.height == 25, pid
         out[pid] = png(im, like)
     return out
