@@ -1110,3 +1110,296 @@ def build_tiger_stripes(cave, stubs, phase=TIGER_STRIPES_PHASE, vtable=TIGER_SID
     code = a.assemble()
     return code, {'sidefill': a.labels['sidefill'], 'itemfill': a.labels['itemfill'], 'sdivider': a.labels['divider'],
                   'sopaque': a.labels['opaque']}
+
+
+# Jaguar's toolbar buttons on Tiger (patch.py 'toolbar', images: toolbar.py
+# TIGER_IDS). Tiger's Back/Forward and View controls are HISegmentedViews
+# (2 and 3 segments, both made by sub_34650), drawn by the theme. Each gets a
+# Carbon event handler, installed as its segments are counted, that draws
+# Jaguar's images instead (kEventControlDraw) and hit-tests by their slots
+# (kEventControlHitTest: HIView's tracking asks the view for the part under
+# the mouse, so clicks follow the new layout). Part n is segment n, as in
+# HISegmentView::IsHitByPointInternal; a disabled segment is part 0.
+#
+# A segment's image: its first id + its record's state table, indexed by
+#   0 inactive (window inactive, view or segment disabled), not selected
+#   1 inactive, selected       2 pressed      3 pressed (Graphite)
+#   4 selected                 5 selected (Graphite)        6 normal
+# In the search window the View control's last segment is Group instead of
+# Column (command 'Vgrp'): its images are the next 6 ids (toolbar.TIGER_GROUP).
+# Images are read from Finder.rsrc at each draw (GetResource keeps the data
+# loaded; the CGImage lives for the draw only), so nothing is stored.
+TIGER_GRAPHITE = 0x1931c0          # sub_1931c0(): 1 when the appearance is Graphite (CopyThemeIdentifier)
+TIGER_TOOLBAR_STUBS = ['_GetControlEventTarget', '_InstallEventHandler', '_HISegmentedViewSetSegmentCount',
+                       '_HISegmentedViewGetSegmentCount', '_HISegmentedViewIsSegmentEnabled',
+                       '_GetEventKind', '_GetEventParameter', '_SetEventParameter', '_HIViewGetBounds',
+                       '_IsControlActive', '_IsControlEnabled', '_GetControlHilite', '_GetControl32BitValue',
+                       '_HISegmentedViewGetSegmentCommand',
+                       '_GetResource', '_GetHandleSize', '_CGDataProviderCreateWithData',
+                       '_CGImageCreateWithPNGDataProvider', '_CGDataProviderRelease', '_HIViewDrawCGImage',
+                       '_CGImageRelease']
+# per segment count (2, 3): first id, ids per segment, slot width, state table
+TIGER_SEGMENTS = [
+    (8910, 4, 28.0, (2, 2, 1, 3, 0, 0, 0)),     # Back, Forward: normal, pressed, disabled, pressed (Graphite)
+    (8620, 6, 26.0, (0, 1, 2, 2, 3, 4, 5)),     # View (toolbar.VIEW_STATES)
+]
+TIGER_BUTTON_HEIGHT = 25.0
+GROUP_COMMAND = 'Vgrp'             # the search window's third View segment (sub_34fb4), images after Column's
+EVENT_NOT_HANDLED = -9874
+
+
+def _fdivs(a, ft, fa, fb): a.emit((59 << 26) | (ft << 21) | (fa << 16) | (fb << 11) | (18 << 1))
+def _mulli(a, rt, ra, v): a.emit(d_form(7, rt, ra, v))
+def _clrlwi24(a, ra, rs): _rlwinm(a, ra, rs, 0, 24, 31)
+def _bgt(a, t): a._br('bc', t, 12, 29)
+def _lhz(a, rt, d, ra): a.emit(d_form(40, rt, ra, d))
+def _lbz(a, rt, d, ra): a.emit(d_form(34, rt, ra, d))
+def _add(a, rt, ra, rb): a.emit((31 << 26) | (rt << 21) | (ra << 16) | (rb << 11) | (266 << 1))
+def _extsh(a, ra, rs): a.emit((31 << 26) | (rs << 21) | (ra << 16) | (922 << 1))
+
+
+def _ostype(s):
+    return struct.unpack('>I', s.encode('mac_roman'))[0]
+
+
+def build_tiger_toolbar(cave, stubs, graphite=TIGER_GRAPHITE, segments=TIGER_SEGMENTS):
+    """cave: where the routines go (constants first). Entry points:
+      segviews(view r3, count r4): stands in for sub_34650's
+        HISegmentedViewSetSegmentCount: installs the handler on the view
+        (userData = the view), then counts its segments
+      handler(callRef r3, event r4, view r5): the Carbon event handler
+    Returns (bytes, {'segviews': addr})."""
+    REC = 20                                   # record: u16 first id, u16 ids per segment, u16 count, pad, f32 slot, 7 states, pad
+    consts = struct.pack('>4I', _ostype('cntl'), 4, _ostype('cntl'), 3)      # 0  SPECS
+    consts += struct.pack('>2f', 0.0, TIGER_BUTTON_HEIGHT)                   # 16 ZERO HEIGHT
+    RECS = len(consts)
+    for n, (first, per, slot, states) in enumerate(segments, start=2):
+        consts += struct.pack('>3HH f 7B x', first, per, n, 0, slot, *states)
+    assert len(consts) == RECS + REC * len(segments)
+    SPECS, ZERO, HEIGHT = 0, 16, 20
+    a = Asm(cave)
+    a.data(consts)
+    hi, lo = (cave + 0x8000) >> 16, cave & 0xffff
+    K = 31
+
+    # segviews(view, count)
+    a.label('segviews')
+    a.mflr(0)
+    _stmw(a, 30, -8, 1)
+    a.stw(0, 8, 1)
+    a.stwu(1, -0x50, 1)
+    a.mr(31, 3)
+    a.mr(30, 4)
+    a.bl(stubs['_GetControlEventTarget'])
+    a.lis(4, 0); a.addi(4, 4, 0)               # handler address, patched below
+    fix_handler = len(a.words) - 2
+    a.li(5, 2)
+    a.lis(6, hi); a.addi(6, 6, lo + SPECS)
+    a.mr(7, 31)
+    a.li(8, 0)
+    a.bl(stubs['_InstallEventHandler'])
+    a.mr(3, 31)
+    a.mr(4, 30)
+    a.lwz(0, 0x58, 1)
+    a.addi(1, 1, 0x50)
+    a.mtlr(0)
+    _lmw(a, 30, -8, 1)
+    a.b(stubs['_HISegmentedViewSetSegmentCount'])
+
+    # handler(callRef, event, view); frame 0xa0: 0x40 bounds, 0x50 image rect,
+    # 0x60 ctx (draw) or point (hit test), 0x68 selected (draw) / part,
+    # fctiwz (hit test), 0x6c ids to add for Group (draw), 0x70 Graphite,
+    # 0x74 handle, 0x78 provider, 0x7c image; 0x80.. the saved r24..r31
+    # r24 value, r25 hilite, r26 active, r27 segment, r28 record, r29 event, r30 view
+    a.label('handler')
+    a.mflr(0)
+    _stmw(a, 24, -32, 1)
+    a.stw(0, 8, 1)
+    a.stwu(1, -0xa0, 1)
+    a.lis(K, hi); a.addi(K, K, lo)
+    a.mr(30, 5)
+    a.mr(29, 4)
+    a.mr(3, 30)
+    a.bl(stubs['_HISegmentedViewGetSegmentCount'])
+    a.addi(28, 3, -2)
+    a.cmpwi(28, 0); a.blt('pass')
+    a.cmpwi(28, len(segments) - 1); _bgt(a, 'pass')
+    _mulli(a, 28, 28, REC)
+    _add(a, 28, 28, K)
+    a.addi(28, 28, RECS)
+    a.mr(3, 29)
+    a.bl(stubs['_GetEventKind'])
+    a.cmpwi(3, 3); a.beq('hit')
+    a.cmpwi(3, 4); a.bne('pass')
+
+    # --- kEventControlDraw
+    a.mr(3, 29)
+    a.lis(4, _ostype('cntx') >> 16); a.emit(d_form(24, 4, 4, _ostype('cntx') & 0xffff))   # ori
+    a.mr(5, 4)
+    a.li(6, 0); a.li(7, 4); a.li(8, 0)
+    a.addi(9, 1, 0x60)
+    a.bl(stubs['_GetEventParameter'])
+    a.cmpwi(3, 0); a.bne('pass')
+    a.mr(3, 30); a.addi(4, 1, 0x40)
+    a.bl(stubs['_HIViewGetBounds'])
+    a.mr(3, 30)
+    a.bl(stubs['_IsControlActive'])
+    _clrlwi24(a, 26, 3)
+    a.mr(3, 30)
+    a.bl(stubs['_IsControlEnabled'])
+    _clrlwi24(a, 3, 3)
+    a.cmpwi(3, 0); a.bne('enabled')
+    a.li(26, 0)
+    a.label('enabled')
+    a.mr(3, 30)
+    a.bl(stubs['_GetControlHilite'])
+    _extsh(a, 25, 3)
+    a.mr(3, 30)
+    a.bl(stubs['_GetControl32BitValue'])
+    a.mr(24, 3)
+    a.bl(graphite)
+    _clrlwi24(a, 3, 3)
+    a.stw(3, 0x70, 1)
+    # the search window's View control: its last segment is Group ('Vgrp'),
+    # whose images follow the segment's own (0x6c: ids to add for it)
+    a.mr(3, 30)
+    _lhz(a, 4, 4, 28)
+    a.bl(stubs['_HISegmentedViewGetSegmentCommand'])
+    a.lis(0, _ostype(GROUP_COMMAND) >> 16); a.emit(d_form(24, 0, 0, _ostype(GROUP_COMMAND) & 0xffff))
+    a.cmpw(3, 0)
+    a.li(0, 0)
+    a.bne('nalt')
+    _lhz(a, 0, 2, 28)
+    a.label('nalt')
+    a.stw(0, 0x6c, 1)
+    # the image rect: {x, y, slot, 25}
+    a.lfs(0, 0x40, 1); a.stfs(0, 0x50, 1)
+    a.lfs(0, 0x44, 1); a.stfs(0, 0x54, 1)
+    a.lfs(0, 8, 28); a.stfs(0, 0x58, 1)
+    a.lfs(0, HEIGHT, K); a.stfs(0, 0x5c, 1)
+    a.li(27, 1)
+    a.label('seg')
+    # state: r0 = selected (0/1), then the code in r9
+    a.subf(0, 24, 27)                          # 0 when this segment is the value
+    a.cmpwi(0, 0)
+    a.li(0, 0); a.bne('nsel'); a.li(0, 1)
+    a.label('nsel')
+    a.stw(0, 0x68, 1)
+    a.mr(3, 30); a.mr(4, 27)
+    a.bl(stubs['_HISegmentedViewIsSegmentEnabled'])
+    _clrlwi24(a, 3, 3)
+    a.lwz(9, 0x68, 1)                          # inactive: 0 or 1
+    a.cmpwi(3, 0); a.beq('state')
+    a.cmpwi(26, 0); a.beq('state')
+    a.lwz(0, 0x70, 1)
+    a.cmpw(25, 27); a.bne('npress')
+    a.addi(9, 0, 2); _add(a, 9, 9, 0); a.b('state')   # pressed: 2 + Graphite
+    a.label('npress')
+    a.cmpwi(9, 0); a.beq('normal')
+    a.addi(9, 0, 4); _add(a, 9, 9, 0); a.b('state')   # selected: 4 + Graphite
+    a.label('normal')
+    a.li(9, 6)
+    a.label('state')
+    _add(a, 9, 9, 28)
+    _lbz(a, 9, 12, 9)                          # the record's state table
+    _lhz(a, 0, 2, 28)                          # ids per segment
+    a.addi(4, 27, -1)
+    a.emit((31 << 26) | (4 << 21) | (4 << 16) | (0 << 11) | (235 << 1))   # mullw r4,r4,r0
+    _lhz(a, 0, 0, 28)
+    _add(a, 4, 4, 0)
+    _add(a, 4, 4, 9)                           # r4 = first + (segment - 1) * per + state
+    _lhz(a, 0, 4, 28)
+    a.cmpw(27, 0)
+    a.bne('nlast')
+    a.lwz(0, 0x6c, 1)
+    _add(a, 4, 4, 0)                           # (+ per for Group)
+    a.label('nlast')
+    a.lis(3, _ostype('PNG ') >> 16); a.emit(d_form(24, 3, 3, _ostype('PNG ') & 0xffff))
+    a.bl(stubs['_GetResource'])
+    a.cmpwi(3, 0); a.beq('next')
+    a.stw(3, 0x74, 1)
+    a.bl(stubs['_GetHandleSize'])
+    a.mr(5, 3)
+    a.lwz(4, 0x74, 1); a.lwz(4, 0, 4)
+    a.li(3, 0); a.li(6, 0)
+    a.bl(stubs['_CGDataProviderCreateWithData'])
+    a.cmpwi(3, 0); a.beq('next')
+    a.stw(3, 0x78, 1)
+    a.li(4, 0); a.li(5, 0); a.li(6, 0)
+    a.bl(stubs['_CGImageCreateWithPNGDataProvider'])
+    a.stw(3, 0x7c, 1)
+    a.lwz(3, 0x78, 1)
+    a.bl(stubs['_CGDataProviderRelease'])
+    a.lwz(5, 0x7c, 1)
+    a.cmpwi(5, 0); a.beq('next')
+    a.lwz(3, 0x60, 1); a.addi(4, 1, 0x50)
+    a.bl(stubs['_HIViewDrawCGImage'])
+    a.lwz(3, 0x7c, 1)
+    a.bl(stubs['_CGImageRelease'])
+    a.label('next')
+    a.lfs(0, 0x50, 1); a.lfs(13, 8, 28); a.fadds(0, 0, 13); a.stfs(0, 0x50, 1)
+    a.addi(27, 27, 1)
+    _lhz(a, 0, 4, 28)
+    a.cmpw(27, 0)
+    a.ble('seg')
+    a.li(3, 0)
+    a.b('out')
+
+    # --- kEventControlHitTest: part = 1 + (x - left) / slot, if inside and enabled
+    a.label('hit')
+    a.mr(3, 29)
+    a.lis(4, _ostype('mloc') >> 16); a.emit(d_form(24, 4, 4, _ostype('mloc') & 0xffff))
+    a.lis(5, _ostype('hipt') >> 16); a.emit(d_form(24, 5, 5, _ostype('hipt') & 0xffff))
+    a.li(6, 0); a.li(7, 8); a.li(8, 0)
+    a.addi(9, 1, 0x60)
+    a.bl(stubs['_GetEventParameter'])
+    a.cmpwi(3, 0); a.bne('pass')
+    a.mr(3, 30); a.addi(4, 1, 0x40)
+    a.bl(stubs['_HIViewGetBounds'])
+    a.li(27, 0)
+    a.lfs(1, ZERO, K)
+    a.lfs(0, 0x64, 1); a.lfs(13, 0x44, 1); a.fsubs(0, 0, 13)      # y - top
+    a.fcmpu(0, 1); a.blt('part')
+    a.lfs(13, 0x4c, 1); a.fcmpu(0, 13); a.bge('part')
+    a.lfs(0, 0x60, 1); a.lfs(13, 0x40, 1); a.fsubs(0, 0, 13)      # x - left
+    a.fcmpu(0, 1); a.blt('part')
+    a.lfs(13, 8, 28); _fdivs(a, 0, 0, 13)
+    _fctiwz(a, 0, 0)
+    _stfd(a, 0, 0x68, 1)
+    a.lwz(27, 0x6c, 1)
+    a.addi(27, 27, 1)
+    _lhz(a, 0, 4, 28)
+    a.cmpw(27, 0)
+    a.li(9, 0)
+    _bgt(a, 'nopart')
+    a.mr(3, 30); a.mr(4, 27)
+    a.bl(stubs['_HISegmentedViewIsSegmentEnabled'])
+    _clrlwi24(a, 3, 3)
+    a.cmpwi(3, 0); a.bne('part')
+    a.label('nopart')
+    a.li(27, 0)
+    a.label('part')
+    a.sth(27, 0x68, 1)
+    a.mr(3, 29)
+    a.lis(4, _ostype('cprt') >> 16); a.emit(d_form(24, 4, 4, _ostype('cprt') & 0xffff))
+    a.mr(5, 4)
+    a.li(6, 2)
+    a.addi(7, 1, 0x68)
+    a.bl(stubs['_SetEventParameter'])
+    a.li(3, 0)
+    a.b('out')
+
+    a.label('pass')
+    a.li(3, EVENT_NOT_HANDLED)
+    a.label('out')
+    a.lwz(0, 0xa8, 1)
+    a.addi(1, 1, 0xa0)
+    a.mtlr(0)
+    _lmw(a, 24, -32, 1)
+    a.blr()
+
+    h = a.labels['handler']
+    a.words[fix_handler] = d_form(15, 4, 0, (h + 0x8000) >> 16)
+    a.words[fix_handler + 1] = d_form(14, 4, 4, h & 0xffff)
+    code = a.assemble()
+    return code, {'segviews': a.labels['segviews']}

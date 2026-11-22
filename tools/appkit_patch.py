@@ -12,8 +12,8 @@ CGSNewWindow and only then made it non-opaque. We do the same:
   2. The window is then sent [self setOpaque:NO] (window flag + server
      opacity), where Panther only did that for windows that weren't opaque.
 
-Also (Panther only), the gap between the title bar buttons is 8 px instead
-of 7, so Jaguar's buttons sit 22 px apart, as in Jaguar and in Carbon windows.
+Also, the gap between the title bar buttons is 8 px instead of 7, so
+Jaguar's buttons sit 22 px apart, as in Jaguar and in Carbon windows.
 
 Cost: titled Cocoa windows are blended by the window server like Panther's
 own brushed-metal windows (Safari, iTunes) already are.
@@ -54,6 +54,8 @@ PATCHES_10411 = [
     (0x937baef0, 0x4bfeff03, 0x80610538, '_commonAwake: lwz r3,self'),
     (0x937baef4, 0x38800000, 0x38a00000, '_commonAwake: li r5,NO'),
     (0x937baef8, 0x48007655, None,       '_commonAwake: bl -[NSWindow setOpaque:]'),
+    # 3. as in 10.3.9: Jaguar's buttons 22 px apart
+    (0x937df218, 0x3c0040e0, 0x3c004100, '_windowTitlebarButtonSpacingWidth: 7.0 -> 8.0 (non-utility)'),
 ]
 
 # build -> (-[NSWindow setOpaque:], patches)

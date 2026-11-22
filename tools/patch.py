@@ -242,8 +242,19 @@ TIGER_PATCHES = [
     ('softlines', 0x1a7cc4, 0xc002d5a4, ('lfs_cave', 'line'), 'scope bar line gray 0.54 -> 212/255'),
     ('softlines', 0x1a8bc4, 0xc002d5a4, ('lfs_cave', 'line'), 'bar line gray 0.54 -> 212/255'),
     ('softlines', 0x1b85d0, 0x3884d288, ('addi_cave', 'line'), 'path pane frame: stroke color 158 gray -> 212 (RGBA)'),
+    # Jaguar's toolbar buttons (toolbar.py TIGER_IDS, cave.build_tiger_toolbar):
+    # Back/Forward and View are HISegmentedViews (sub_34650 makes both); as
+    # their segments are counted, each gets an event handler that draws
+    # Jaguar's images (28 px slots for Back and Forward, 26 for the View
+    # segments) and hit-tests by them. The items' min/max sizes follow:
+    # Back/Forward 53 -> 56 (2 x 28), View 81 -> 78 (3 x 26). Action and Path
+    # draw their 46 px images in 46 px items already (no 'toolbar' fix there).
+    ('toolbar', 0x346e8, 0x481c36c9, ('bl_cave', 'segviews'), 'segmented view: bl HISegmentedViewSetSegmentCount -> bl <install Jaguar draw>'),
+    ('toolbar', 0x343d4, 0x3c004250, 0x3c004260, 'Back/Forward view frame: width 52.0 -> 56.0'),
+    ('toolbar', 0x35d88, 0x3c004254, 0x3c004260, 'Back/Forward item size: width 53.0 -> 56.0 (min and max)'),
+    ('toolbar', 0x35d9c, 0x3c0042a2, 0x3c00429c, 'View item size: width 81.0 -> 78.0 (min and max)'),
 ]
-TIGER_SET_NAMES = ['nometal', 'square', 'topbar', 'shadow', 'gap', 'softlines']
+TIGER_SET_NAMES = ['nometal', 'square', 'topbar', 'shadow', 'gap', 'softlines', 'toolbar']
 # 'stripes' on Tiger (cave.build_tiger_stripes): the sidebar's back color
 # fills (its Draw, sub_3f6e4, and an item's while one is dragged, sub_16de60)
 # stripe instead; scrolling redraws it instead of copying its pixels; the
@@ -276,20 +287,23 @@ def is_tiger(m):
 def place_tiger_cave(m, data, names, quiet):
     """Write the routines of the sets in `names` ('shadow': cave.build_tiger_bar,
     'gap': cave.build_tiger_divider, or with 'stripes' cave.build_tiger_stripes
-    instead; 'softlines': cave.build_tiger_line, its constants only) into the
+    instead; 'softlines': cave.build_tiger_line, its constants only;
+    'toolbar': cave.build_tiger_toolbar) into the
     free space at the end of __TEXT, one after the other; returns {'bar':
-    entry, 'divider': entry, 'line': RGBA gray, 'line_gray': float gray, and
-    with 'stripes' its entries: 'sidefill', 'itemfill', 'sdivider', 'sopaque'}."""
+    entry, 'divider': entry, 'line': RGBA gray, 'line_gray': float gray,
+    'segviews' ('toolbar'), and with 'stripes' its entries: 'sidefill',
+    'itemfill', 'sdivider', 'sopaque'}."""
     import cave
     last = max(x['addr'] + x['size'] for x in m.sections if x['seg'] == '__TEXT')
     seg = [x for x in m.segments if x['name'] == '__TEXT'][0]
     end = seg['vmaddr'] + seg['filesize']
-    stubs = {nm: stub_addr(m, nm) for nm in cave.TIGER_BAR_STUBS + cave.TIGER_STRIPES_STUBS}
+    stubs = {nm: stub_addr(m, nm) for nm in cave.TIGER_BAR_STUBS + cave.TIGER_STRIPES_STUBS + cave.TIGER_TOOLBAR_STUBS}
     caddr, entries = (last + 15) & ~15, {}
     for key, setname, build in (('bar', 'shadow', cave.build_tiger_bar),
                                 ('divider', 'gap', cave.build_tiger_divider),
                                 ('line', 'softlines', cave.build_tiger_line),
-                                ('stripes', 'stripes', cave.build_tiger_stripes)):
+                                ('stripes', 'stripes', cave.build_tiger_stripes),
+                                ('toolbar', 'toolbar', cave.build_tiger_toolbar)):
         if setname not in names or (key == 'divider' and 'stripes' in names):
             continue
         code, entries[key], *data_addr = build(caddr, stubs)

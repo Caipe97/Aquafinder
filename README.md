@@ -34,7 +34,8 @@ Make Mac OS X 10.3.9 Panther and 10.4.11 Tiger look and fit better on small scre
   taken from Jaguar's Finder in every state (pressed, selected, inactive, Graphite). The Action
   (gear) and Path buttons, which Jaguar didn't have, get matching capsules, and every button sits
   the same 9 px from the next. Back and Forward sit 6 px apart, and in an inactive window the View
-  control fades with the other buttons. (Panther)
+  control fades with the other buttons. In Tiger's search window, the View control's Group button
+  gets the same capsule, with two stacked boxes drawn from Jaguar's Column symbol.
 - A smaller loading spinner (13 px). It comes from the system theme, so it's installed with the
   title bars and every spinner in the system gets the same size.
 
@@ -42,7 +43,8 @@ Make Mac OS X 10.3.9 Panther and 10.4.11 Tiger look and fit better on small scre
 - Pinstriped title bars from Jaguar (10.2) in every app.
 - Inactive windows get see-through title bars, in both Carbon apps (like the Finder) and Cocoa apps (like TextEdit).
 - Jaguar's close, minimize and zoom buttons: the larger, glossier ones, in Aqua and Graphite,
-  spaced 22 px apart as in Jaguar, in Carbon and Cocoa apps. (Panther)
+  spaced 22 px apart as in Jaguar, in Carbon and Cocoa apps. Where Tiger draws a button that's
+  off in an active window as a clear bead, it gets Jaguar's faded gray one.
 
 ![Jaguar title bars: active (top), inactive (bottom)](screens/titlebars.png)
 ![See-through inactive Cocoa window (TextEdit)](screens/cocoa-inactive.png)
@@ -135,7 +137,7 @@ The `tools/` folder has everything used to build the script: a small PowerPC dis
 the patch definitions (`patch.py`, `appkit_patch.py`, `theme.py`) and helpers for testing in QEMU.
 
 To rebuild `dist/aquafinder.sh`, put your own copies of the Apple files in `orig/` and `theme/`
-(they aren't in this repo): for Tiger, `orig/tiger-10.4.11/` (Finder, AppKit) and
+(they aren't in this repo): for Tiger, `orig/tiger-10.4.11/` (Finder, Finder.rsrc, AppKit) and
 `theme/tiger-10.4.11/Extras.rsrc`, from 10.4.11 (8S165). The logo part also reads `orig/logo/`
 (files from 10.3.9, 10.4.11 and 10.2.8, listed in `tools/logo.py`) and needs Pillow. The toolbar
 buttons read Jaguar's Finder art from `orig/jaguar-10.2.8/Finder-Localized.rsrc` (10.2.8's

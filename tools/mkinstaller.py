@@ -3,7 +3,7 @@
 components (files are recognised by fingerprint, so one script serves both):
 
   finder     Aqua (non-brushed-metal) Finder windows with toolbar + sidebar,
-             and the status bar under the toolbar (Jaguar)
+             the status bar under the toolbar and the toolbar buttons (Jaguar)
   stripes    option for finder: a pinstriped sidebar with a slim, shadowed
              divider (patch.py 'stripes'; on Panther also grip.py stripes)
   titlebars  Jaguar's pinstriped, translucent title bars (theme Extras.rsrc,
@@ -13,7 +13,7 @@ components (files are recognised by fingerprint, so one script serves both):
 """
 import sys, hashlib, os
 sys.path.insert(0, os.path.dirname(__file__))
-import patch, theme, appkit_patch, logo, grip
+import patch, theme, appkit_patch, logo, grip, toolbar
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 FINDER_PATH = '/System/Library/CoreServices/Finder.app/Contents/MacOS/Finder'
@@ -22,6 +22,7 @@ THEME_PATH = ('/System/Library/Frameworks/Carbon.framework/Versions/A/Frameworks
 APPKIT_PATH = '/System/Library/Frameworks/AppKit.framework/Versions/C/AppKit'
 GRIP_PATH = '/System/Library/CoreServices/Finder.app/Contents/Resources/Finder.rsrc'
 GRIP_SRC = 'orig/Finder.rsrc'                        # 10.3.9 (same as 10.3.4's)
+TIGER_GRIP_SRC = 'orig/tiger-10.4.11/Finder.rsrc'    # 10.4.11 (8S165)
 FINDER_BUILDS = [('10.3.9', 'orig/Finder-10.3.9'),
                  ('10.4.11', 'orig/tiger-10.4.11/Finder')]   # 8S165
 APPKIT_SRC = 'orig/appkit/AppKit-10.3.9'             # stock, from the 10.3.9 Combo
@@ -140,15 +141,21 @@ for ver, rel in FINDER_BUILDS:
         entries.append(('finder', key + 'stripes', lbl + ', pinstriped sidebar', skip, count, mo, ms, edit_lines(a, b)))
     styled.append(('finder', key, lbl, skip, count, mo, mp, ms))
 
-# The Finder's resources: the sidebar divider's image, the column view's
-# divider instead of the metal dimple, or the pinstriped sidebar's (installed
-# and restored with the Finder).
+# The Finder's resources: on Panther the sidebar divider's image, the column
+# view's divider instead of the metal dimple, or the pinstriped sidebar's, and
+# Jaguar's toolbar buttons (installed and restored with the Finder).
 a = open(os.path.join(ROOT, GRIP_SRC), 'rb').read()
 b = grip.build(a)
 entries.append(('grip', 'finderrsrc', 'Finder images', 0, 0, md5(a), md5(b), edit_lines(a, b)))
 c = grip.build(a, stripes=True)
 entries.append(('grip', 'finderrsrcstripes', 'Finder images, pinstriped sidebar', 0, 0, md5(a), md5(c), edit_lines(a, c)))
 styled.append(('grip', 'finderrsrc', 'Finder images', 0, 0, md5(a), md5(b), md5(c)))
+# Tiger's: Jaguar's toolbar buttons (toolbar.build_tiger; Tiger draws its
+# sidebar divider in code, so there is one style)
+a = open(os.path.join(ROOT, TIGER_GRIP_SRC), 'rb').read()
+b = toolbar.build_tiger(a)
+entries.append(('grip', 'finderrsrctiger', 'Finder images 10.4.11', 0, 0, md5(a), md5(b), edit_lines(a, b)))
+styled.append(('grip', 'finderrsrctiger', 'Finder images 10.4.11', 0, 0, md5(a), md5(b), None))
 
 import contextlib, io
 # Tiger's title bar, toolbar and spinner art is Panther's (byte for byte), so
@@ -163,10 +170,9 @@ for rel, key, lbl, out in ((THEME_SRC, 'theme', 'Panther theme', 'Extras-jaguarb
         # toolbar background brush -> Jaguar's pinstripes, as the toolbar art above
         # (the Finder erases the status bar with it)
         theme.jaguar_toolbar_brush(theme_out, theme_out)
-        # Jaguar's close/minimize/zoom buttons in Aqua title bars (Panther; Tiger's
-        # buttons have more states, not mapped yet)
-        if key == 'theme':
-            theme.jaguar_window_buttons(theme_out, os.path.join(ROOT, JAGUAR_SRC), theme_out)
+        # Jaguar's close/minimize/zoom buttons in Aqua title bars (Tiger's have
+        # more states: theme.EXTRA_STATES)
+        theme.jaguar_window_buttons(theme_out, os.path.join(ROOT, JAGUAR_SRC), theme_out)
     a, b = open(os.path.join(ROOT, rel), 'rb').read(), open(theme_out, 'rb').read()
     entries.append(('titlebars', key, lbl, 0, 0, md5(a), md5(b), edit_lines(a, b)))
 
@@ -266,8 +272,8 @@ script = r'''#!/bin/sh
 #
 #   finder     Aqua (non-brushed-metal) Finder windows that keep toolbar + sidebar,
 #              the status bar under the toolbar as in Jaguar, and a sidebar divider
-#              drawn like the column view's (plus the Finder's resources: the
-#              divider's image)
+#              drawn like the column view's, and Jaguar's toolbar buttons (plus
+#              the Finder's resources: the divider's image, the buttons)
 #   stripes    option for finder: a pinstriped sidebar with a slim, shadowed
 #              divider (restore stripes puts the plain sidebar back)
 #   titlebars  Jaguar-style pinstriped, translucent window title bars
@@ -294,9 +300,6 @@ APPKIT="${APPKIT:-__APPKIT__}"
 GRIP="${GRIP:-__GRIP__}"
 BACKUP_DIR="${BACKUP_DIR:-/Library/Aquafinder}"
 OLD_BACKUP_DIR=/Library/PantherSlim   # backups made under the old name
-# Tiger: its Finder draws the sidebar divider itself (no divider image in
-# Finder.rsrc to patch).
-case "$(sw_vers -productVersion 2>/dev/null)" in 10.4*) TIGER=1 ;; *) TIGER= ;; esac
 
 die() { echo "aquafinder: $*" >&2; [ -n "$TMP" ] && rm -f "$TMP"; exit 1; }
 sum() { md5 < "$1" | awk '{print $NF}'; }
@@ -427,10 +430,10 @@ finder_style() {   # FINDER_STYLE for install finder: the installed Finder's (pl
   identify "$FINDER" finder; FINDER_STYLE="${STYLE:-plain}"
 }
 
-install_finder() {   # install_finder <finder|stripes>: the Finder and (Panther) its resources, in FINDER_STYLE
+install_finder() {   # install_finder <finder|stripes>: the Finder and its resources, in FINDER_STYLE
   finder_style
   install_one "$FINDER" "$1" || RC=1
-  [ -n "$TIGER" ] || install_one "$GRIP" grip || RC=1
+  install_one "$GRIP" grip || RC=1
   FINDER_STYLE=
 }
 
@@ -487,14 +490,14 @@ case "$1" in
     finish ;;
   restore|uninstall)
     need_root restore
-    want finder    && { restore_one "$FINDER" finder || RC=1; [ -n "$TIGER" ] || restore_one "$GRIP" grip || RC=1; }
+    want finder    && { restore_one "$FINDER" finder || RC=1; restore_one "$GRIP" grip || RC=1; }
     [ "$WHAT" = stripes ] && { stripes_off || RC=1; }
     want titlebars && { restore_one "$THEME" titlebars || RC=1; restore_one "$APPKIT" appkit || RC=1; }
     want logo      && for F in $LOGO_FILES; do [ -f "$F" ] || continue; restore_one "$F" logo || RC=1; done
     finish ;;
   status|"")
     status_one "$FINDER" finder
-    [ -n "$TIGER" ] || status_one "$GRIP" grip
+    status_one "$GRIP" grip
     status_stripes
     status_one "$THEME" titlebars
     status_one "$APPKIT" appkit

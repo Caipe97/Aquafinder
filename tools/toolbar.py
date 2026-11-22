@@ -47,6 +47,17 @@ Input (an Apple file, not in the repo): orig/jaguar-10.2.8/Finder-Localized.rsrc
 from 10.2.8.
 
 build(finder_rsrc) -> {'PNG ' id: new PNG bytes} (8615-8617 are new)
+
+Tiger 10.4.11 has the same Gear and Path images (4300-4303, 7300-7303,
+byte for byte), but its Back/Forward and View controls are HISegmentedViews,
+drawn by the theme around Tiger's own symbols (8900-8901, 8600-8603). Its
+Finder (patch.py 'toolbar', cave.build_tiger_toolbar) draws Jaguar's images
+over them instead, the same images as Panther's under new ids (TIGER_IDS):
+Back and Forward 8910-8917, the View control's segments 8620-8637, so
+Tiger's symbols stay as they are, and a Group segment for its search window,
+8638-8643 (group_images).
+
+build_tiger(finder_rsrc) -> Tiger's Finder.rsrc bytes with them
 """
 import os, sys, struct, zlib, io
 sys.path.insert(0, os.path.dirname(__file__))
@@ -197,6 +208,66 @@ def png(im, like):
             + grip.chunk(b'IDAT', zlib.compress(raw, 9)) + grip.chunk(b'IEND', b''))
 
 
+def _segment(j, n, k):
+    """View segment n (0 Icon, 1 List, 2 Column) in state k, before VIEW_HALF."""
+    first, base, graphite, msk, (c0, c1) = SEGMENTS[n]
+    st = VIEW_STATES[k]
+    seg = _rgba(j(graphite if st == 'G' else base + st), j(msk), (c0, ROWS[0], c1, ROWS[1]))
+    if seg.width < 26:
+        seg = _widen(seg, [c - c0 for c in LIST_WIDEN])
+    assert seg.size == (26, 25), seg.size
+    return seg
+
+
+def _half(seg, k):
+    if k in VIEW_HALF:
+        seg.putalpha(seg.getchannel('A').point(lambda v: (v + 1) // 2))
+    return seg
+
+
+# Tiger's search window turns the View control's third segment into Group
+# (two stacked boxes, Tiger's 8603). Jaguar had no Group view: its image is
+# Jaguar's Column segment with the symbol's 13x10 box restacked as two 13x4
+# boxes. The symbol is taken apart from the segment's fill (GROUP_PLAIN, a
+# plain column, repeated across it at each row, gives the fill's gradient):
+# its coverage per pixel, toward the darkest ink in the box, is moved by rows
+# (GROUP_ROWS: each box is the Column box's top stroke, its two shaded rows,
+# its bottom stroke and the rows under that; the inner strokes left out,
+# GROUP_INNER: the shading between them), then laid back on the fill. So
+# every state keeps Jaguar's ink, shading and fill. Segment columns 4-18,
+# rows 7-18 (the box is 5-17 x 7-16).
+GROUP_ROWS = {7: 7, 8: 8, 9: 9, 10: 16, 11: 17, 12: 18, 13: 7, 14: 8, 15: 9, 16: 16, 17: 17, 18: 18}
+GROUP_COLS, GROUP_EDGES, GROUP_INNER, GROUP_PLAIN = (4, 19), (4, 5, 17, 18), 7, 3
+GROUP_BOX = (5, 7, 18, 17)
+
+
+def group_images():
+    """{state k: RGBA image}: the Group segment, in VIEW_STATES order."""
+    import numpy as np
+    j = _jaguar(); out = {}
+    for k in range(len(VIEW_STATES)):
+        col = np.array(_segment(j, 2, k)).astype(float)
+        fill = col.copy()
+        fill[:, GROUP_COLS[0]:GROUP_COLS[1] + 2] = col[:, GROUP_PLAIN:GROUP_PLAIN + 1]
+        lum = lambda a: a[..., :3].mean(axis=-1)
+        x0, y0, x1, y1 = GROUP_BOX
+        box = col[y0:y1, x0:x1]
+        iy, ix = np.unravel_index(np.argmin(lum(box)), box.shape[:2])
+        ink = box[iy, ix, :3]
+        cover = np.clip((lum(fill) - lum(col)) / np.maximum(lum(fill) - ink.mean(), 1), 0, 1)
+        new = cover.copy()
+        for y, sy in GROUP_ROWS.items():
+            for x in range(*GROUP_COLS):
+                inner = sy in (8, 9) and x not in GROUP_EDGES
+                new[y, x] = cover[sy, GROUP_INNER if inner else x]
+        img = col.copy()
+        for y in GROUP_ROWS:
+            for x in range(*GROUP_COLS):
+                img[y, x, :3] = fill[y, x, :3] * (1 - new[y, x]) + ink * new[y, x]
+        out[k] = _half(Image.fromarray(np.clip(img + 0.5, 0, 255).astype('uint8'), 'RGBA'), k)
+    return out
+
+
 def images():
     """{Panther id: RGBA image}"""
     j = _jaguar(); out = {}
@@ -207,28 +278,56 @@ def images():
         slot = Image.new('RGBA', (ARROW_SLOT, im.height))
         slot.paste(im, (0 if pid < 8904 else ARROW_SLOT - im.width, 0))
         out[pid] = slot
-    for first, base, graphite, msk, (c0, c1) in SEGMENTS:
-        for k, st in enumerate(VIEW_STATES):
-            src = graphite if st == 'G' else base + st
-            seg = _rgba(j(src), j(msk), (c0, ROWS[0], c1, ROWS[1]))
-            if seg.width < 26:
-                seg = _widen(seg, [c - c0 for c in LIST_WIDEN])
-            assert seg.size == (26, 25), seg.size
-            if k in VIEW_HALF:
-                seg.putalpha(seg.getchannel('A').point(lambda v: (v + 1) // 2))
-            out[first + k] = seg
+    for n, (first, base, graphite, msk, (c0, c1)) in enumerate(SEGMENTS):
+        for k in range(len(VIEW_STATES)):
+            out[first + k] = _half(_segment(j, n, k), k)
     for kind in (GEAR, PATH):
         for k, (ids, disabled) in enumerate(CAPSULE_STATES):
             out[kind + k] = _capsule_button(j, kind, ids, disabled)
     return out
 
 
-def build(finder_rsrc):
+def build(finder_rsrc, ids=None, like_id=SEGMENTS[0][0]):
+    """{id: PNG bytes}; ids maps Panther ids to the file's (default: the same)."""
     rf = ResFile(finder_rsrc); out = {}
     for pid, im in images().items():
-        like = rf.res.get(('PNG ', pid), rf.res[('PNG ', SEGMENTS[0][0])])['data']   # new ids: like 8600
+        rid = ids(pid) if ids else pid
+        like = rf.res.get(('PNG ', rid), rf.res[('PNG ', like_id)])['data']   # new ids: like 8600 (Tiger: 4300)
         assert Image.open(io.BytesIO(like)).height == im.height == 25, pid
-        out[pid] = png(im, like)
+        out[rid] = png(im, like)
+    return out
+
+
+# Tiger 10.4.11: Panther id -> Tiger id (see above); the Group segment
+# (group_images) follows the View segments, 8638-8643
+TIGER_ARROWS, TIGER_VIEW, TIGER_GROUP = 8910, 8620, 8638
+
+
+def tiger_id(pid):
+    if 8900 <= pid < 8908:
+        return TIGER_ARROWS + pid - 8900
+    if 8600 <= pid < 8618:
+        return TIGER_VIEW + pid - 8600
+    return pid
+
+
+def build_tiger(finder_rsrc):
+    """Tiger's Finder.rsrc with Jaguar's toolbar buttons: Gear and Path
+    replaced (appended, rsrc.with_replaced), Back/Forward and View added."""
+    rf = ResFile(finder_rsrc)
+    assert ('PNG ', TIGER_ARROWS) not in rf.res and ('PNG ', TIGER_VIEW) not in rf.res, 'not a stock Tiger Finder.rsrc'
+    buttons = {('PNG ', i): b for i, b in build(finder_rsrc, tiger_id, GEAR).items()}
+    like = rf.res[('PNG ', GEAR)]['data']
+    for k, im in group_images().items():
+        buttons[('PNG ', TIGER_GROUP + k)] = png(im, like)
+    out = rf.with_replaced({k: b for k, b in buttons.items() if k in rf.res})
+    for k, b in sorted(buttons.items()):
+        if k not in rf.res:
+            out = ResFile(out).with_added(k[0], k[1], None, b)
+    new = ResFile(out)
+    assert all(new.res[k]['data'] == b for k, b in buttons.items())
+    assert all(new.res[k]['data'] == r['data'] and new.res[k]['name'] == r['name']
+               for k, r in rf.res.items() if k not in buttons)
     return out
 
 

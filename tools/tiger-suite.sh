@@ -2,7 +2,8 @@
 # Aquafinder test suite for Tiger 10.4.11, run as root in the VM with
 # dist/aquafinder.sh copied to /tmp/aquafinder.sh:
 #   sh tiger-suite.sh quick   status, the stripes option on and off (from the plain Finder and
-#                             from the original), the Finder round trip, bad args, non-root
+#                             from the original), the Finder round trip (with its Finder.rsrc,
+#                             which keeps one style), bad args, non-root
 #                             (STRIPES_MD5=<md5 of build/Finder-10.4.11-stripes> also checks it)
 #   sh tiger-suite.sh full    install all (no-op), restore all, install all: files as at the start
 # Prints PASS/FAIL per check and a summary. It runs with NO_RESTART=1: nothing
@@ -35,14 +36,14 @@ save start
 if [ "$1" = quick ]; then
   run status 0 status
   has status 'finder: Aquafinder installed (Finder 10.4.11, plain sidebar)'
-  hasnt status '^grip:'
+  has status 'grip: Aquafinder installed (Finder images 10.4.11)'
   has status 'stripes: original (plain sidebar)'
   same status start
 
   # the stripes option, from the plain Finder and back
   run 'install stripes' 0 install stripes
   has 'install stripes' 'stripes: switched to the pinstriped sidebar (Finder 10.4.11)'
-  hasnt 'install stripes' 'grip'
+  has 'install stripes' 'grip: already installed (Finder images 10.4.11).'
   [ -z "$STRIPES_MD5" ] || { [ "$(FM)" = "$STRIPES_MD5" ] && ok 'install stripes: Finder = the stripes build' || bad "install stripes: Finder $(FM) != $STRIPES_MD5"; }
   [ "$(md5 -q $R)" = "$(grep "^$R " /tmp/suite.start | cut -d' ' -f2)" ] && ok 'install stripes: Finder.rsrc untouched' || bad 'install stripes: Finder.rsrc changed'
   save stripes
@@ -64,17 +65,18 @@ if [ "$1" = quick ]; then
 
   run 'install finder (installed)' 0 install finder
   has 'install finder (installed)' 'finder: already installed (Finder 10.4.11).'
-  hasnt 'install finder (installed)' 'grip'
+  has 'install finder (installed)' 'grip: already installed (Finder images 10.4.11).'
   same 'install finder (installed)' start
 
   # the original Finder: restore, the option on and off from there
   run 'restore finder' 0 restore finder
   has 'restore finder' 'finder: restored original (Finder 10.4.11).'
-  hasnt 'restore finder' 'grip'
+  has 'restore finder' 'grip: restored original (Finder images 10.4.11).'
   [ "$(FM)" = "$(md5 -q /Library/Aquafinder/Finder-finder10411.orig)" ] && ok 'restore finder: Finder = its backup' || bad 'restore finder: Finder != backup'
   save restored
   run 'status (restored)' 0 status
   has 'status (restored)' 'finder: original (Finder 10.4.11)'
+  has 'status (restored)' 'grip: original (Finder images 10.4.11)'
   has 'status (restored)' 'stripes: original (Aqua Finder not installed)'
   run 'restore finder (original)' 0 restore finder
   has 'restore finder (original)' 'finder: already original'
@@ -115,7 +117,7 @@ if [ "$1" = full ]; then
   hasnt 'install (all, installed)' 'unrecognised'
   same 'install (all, installed)' start
   run 'restore (all)' 0 restore
-  hasnt 'restore (all)' 'grip'
+  has 'restore (all)' 'grip: restored original (Finder images 10.4.11).'
   run 'status (all restored)' 0 status
   hasnt 'status (all restored)' 'Aquafinder installed'
   save allrestored

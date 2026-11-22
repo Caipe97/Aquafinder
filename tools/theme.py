@@ -136,13 +136,25 @@ WINDOW_BUTTON_ROWS = (1, 17)
 WINDOW_BUTTONS = {4690: 200, 4700: 210, 4710: 220,
                   13176: 10182, 13178: 10183, 13180: 10184,
                   13177: 10161, 13179: 10171, 13181: 10181}
+# Tiger 10.4.11 carries the same buttons (same ids, size and placement) with
+# states added at the end: close 12 instead of 10, minimize and zoom 7
+# instead of 6. The new ones are an unavailable button in an active window
+# (Tiger's clear, colorless bead; dirty for close's 12th), where Panther
+# drew one of its gray states. Each takes Jaguar's: unavailable (5) and
+# dirty, inactive (8). (state count, Jaguar's) -> Jaguar states for the
+# states past Jaguar's own.
+EXTRA_STATES = {
+    (10, 9): [8],          # Panther close: a second dirty-and-inactive state
+    (12, 9): [8, 5, 8],    # Tiger close: that, then unavailable and unavailable dirty
+    (7, 6): [5],           # Tiger minimize and zoom: unavailable
+}
 
 
 def jaguar_window_buttons(in_path, src_path, out_path, buttons=WINDOW_BUTTONS, cols=WINDOW_BUTTON_COLS, rows=WINDOW_BUTTON_ROWS):
-    """Replace each Panther button pxm# with the Jaguar one's pixels (its
-    columns cols[0]..cols[1]-1), keeping Panther's state count (extra states
-    repeat Jaguar's last). The
-    new data is longer, so it's appended (rsrc.with_replaced)."""
+    """Replace each Panther (or Tiger) button pxm# with the Jaguar one's
+    pixels (its columns cols[0]..cols[1]-1), keeping the file's state count
+    (extra states: EXTRA_STATES). The new data is longer, so it's appended
+    (rsrc.with_replaced)."""
     import struct
     rf = ResFile(open(in_path, 'rb').read())
     src = ResFile(open(src_path, 'rb').read())
@@ -155,7 +167,7 @@ def jaguar_window_buttons(in_path, src_path, out_path, buttons=WINDOW_BUTTONS, c
         h = pxm.header(j)
         box = (cols[0], rows[0], cols[1], rows[1])
         ims, ms = [im.crop(box) for im in ims], [m.crop(box) for m in ms]
-        pick = [min(k, jn - 1) for k in range(n)]
+        pick = list(range(jn)) + EXTRA_STATES[(n, jn)] if n > jn else list(range(n))
         head = bytearray(j[:24])
         top, left, bottom, right = struct.unpack_from('>4h', head, 4)
         struct.pack_into('>4h', head, 4, top, left, top + rows[1] - rows[0], left + cols[1] - cols[0])
