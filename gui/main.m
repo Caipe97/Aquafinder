@@ -31,6 +31,8 @@ typedef struct {
 static const Part PARTS[] = {
     { "finder", "finder grip", "Aqua Finder windows",
       "Plain Aqua instead of brushed metal, the item count under the toolbar as in Jaguar, and a sidebar divider like the column view's.", NO, -1 },
+    { "stripes", "stripes", "Pinstriped sidebar",
+      "Pinstripes behind the sidebar, and a slim divider with a soft shadow and a small arrow.", NO, 0 },
     { "titlebars", "titlebars appkit", "Jaguar title bars",
       "Pinstriped title bars from 10.2 in every app, see-through when inactive, and a smaller loading spinner. Needs a restart.", YES, -1 },
     { "logo", "logo", "Jaguar logo and Finder icon",

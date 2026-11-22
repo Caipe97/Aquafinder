@@ -14,7 +14,10 @@ It also appends the search splitter's bar, 'PNG ' 8801 (see SPLITTER_ID),
 and replaces the toolbar's Back, Forward and View buttons with Jaguar's
 (toolbar.py); those are appended too, the originals left unreferenced.
 
-usage: grip.py <Finder.rsrc> <out.rsrc> [divider.png [splitter.png]]
+With stripes=True (patch.py's 'stripes' set) the divider image is the
+pinstriped sidebar's instead: see STRIPES_*.
+
+usage: grip.py [--stripes] <Finder.rsrc> <out.rsrc> [divider.png [splitter.png]]
 """
 import sys, os, io, struct, zlib
 sys.path.insert(0, os.path.dirname(__file__))
@@ -101,13 +104,78 @@ def divider_png(like):
     return png8(len(GRADIENT), rows, like, len(like))
 
 
-def build(finder_rsrc):
+# 'stripes': the divider of the pinstriped sidebar, 7 px (patch.STRIPES_WIDTH):
+# see-through, so the toolbar pinstripes the divider is erased with show,
+# with a soft shadow falling from a 1 px line by the files, and a small
+# arrow in the middle rows (patch.py centers the image on the divider):
+# 8-bit gray + alpha. Columns left to right; the shadow is black, by alpha.
+STRIPES_WIDTH = 7
+STRIPES_LINE = 163
+STRIPES_SHADOW = [.17, .105, .06, .03, .012, .004]   # from the line outwards
+# The arrow: 3 x 5, pointing right (toward the files), in columns 2..4: two
+# stripe columns before it, so, collapsed, it stands clear of the window's
+# left edge, and one before the line. (gray, coverage) per column.
+_ARROW = [(.55, .15, 0), (.9, .7, .15), (.9, .95, .6)]
+STRIPES_ARROW = [[None, None] + [(95, c) if c else None for c in r] + [None] for r in _ARROW + _ARROW[-2::-1]]
+
+
+def png_ga(w, rows, like, size):
+    """8-bit gray+alpha PNG of `rows` (lists of (gray, alpha)), with like's
+    gAMA (and pHYs if it fits), padded to `size` bytes. Filter 'Up' or none,
+    whichever packs smaller."""
+    up, none, prev = b'', b'', bytes(2 * w)
+    for r in rows:
+        b = bytes(v for ga in r for v in ga)
+        up += b'\2' + bytes((x - y) & 0xff for x, y in zip(b, prev))
+        none += b'\0' + b
+        prev = b
+    idat = min(zlib.compress(up, 9), zlib.compress(none, 9), key=len)
+    tail = chunk(b'IDAT', idat) + chunk(b'IEND', b'')
+    for kinds in ((b'pHYs', b'gAMA'), (b'gAMA',)):    # pHYs (pixel density) goes if it must: the grays don't change
+        keep = [c for c in chunks(like) if c[0] in kinds]
+        head = b'\x89PNG\r\n\x1a\n' + chunk(b'IHDR', struct.pack('>IIBBBBB', w, len(rows), 8, 4, 0, 0, 0))
+        head += b''.join(chunk(k, b) for k, b in keep)
+        pad = size - len(head) - len(tail) - 12 - len(b'Comment\0')
+        if pad >= 0:
+            break
+    assert pad >= 0, 'PNG is %d bytes over %d' % (-pad, size)
+    png = head + chunk(b'tEXt', b'Comment\0' + b' ' * pad) + tail
+    assert len(png) == size
+    return png
+
+
+def _over(cols, row):
+    """An icon row (gray, coverage) drawn over the (gray, alpha) columns."""
+    out = list(cols)
+    for x, px in enumerate(row):
+        if px:
+            G, t = px
+            g0, a0 = out[x]
+            s = a0 / 255
+            a = 1 - (1 - s) * (1 - t)
+            out[x] = (round((g0 * s * (1 - t) + G * t) / a), round(255 * a))
+    return out
+
+
+def stripes_divider_png(like):
+    """The pinstriped sidebar's divider, padded to len(like) bytes."""
+    cols = [(0, 0)] * (STRIPES_WIDTH - 1) + [(STRIPES_LINE, 255)]
+    for i, a in enumerate(STRIPES_SHADOW):
+        cols[STRIPES_WIDTH - 2 - i] = (0, round(255 * a))
+    arrow = [_over(cols, r) for r in STRIPES_ARROW]
+    top = HEIGHT // 2 - len(arrow) // 2
+    rows = [cols] * top + arrow + [cols] * (HEIGHT - top - len(arrow))
+    return png_ga(STRIPES_WIDTH, rows, like, len(like))
+
+
+def build(finder_rsrc, stripes=False):
     """Finder.rsrc bytes with the grip replaced (in place), the splitter bar
-    added and the toolbar buttons replaced (both appended)."""
+    added and the toolbar buttons replaced (both appended). stripes: the
+    divider of the pinstriped sidebar instead of the column view's."""
     import toolbar
     rf = ResFile(finder_rsrc)
     like = rf.res[('PNG ', GRIP_ID)]['data']
-    png = divider_png(like)
+    png = stripes_divider_png(like) if stripes else divider_png(like)
     bar = splitter_png(like)
     buttons = {('PNG ', i): b for i, b in toolbar.build(finder_rsrc).items()}
     out = ResFile(rf.patched_in_place({('PNG ', GRIP_ID): png})).with_added('PNG ', SPLITTER_ID, SPLITTER_NAME, bar)
@@ -124,7 +192,10 @@ def build(finder_rsrc):
 
 
 if __name__ == '__main__':
-    out = build(open(sys.argv[1], 'rb').read())
+    stripes = '--stripes' in sys.argv
+    if stripes:
+        sys.argv.remove('--stripes')
+    out = build(open(sys.argv[1], 'rb').read(), stripes)
     open(sys.argv[2], 'wb').write(out)
     if len(sys.argv) > 3:
         from PIL import Image

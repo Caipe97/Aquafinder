@@ -250,19 +250,20 @@ def build_divider_erase(addr, stubs, frame_fn, ext, brush=DIVIDER_BRUSH):
     return a.assemble(), a.labels['back']
 
 
-def build_divider_outset(addr, back, stubs):
+def build_divider_outset(addr, back, stubs, outset=1):
     """DividerOutset, the tail of DividerErase (branched to and back, on its
     stack frame: r at 0x40). The 1px columns on either side of the divider
     are neither the divider's nor the panes' (they held the panes' side
     borders, which 'gap' no longer draws), so erase them with the divider:
-    r.left -= 1, r.right += 1, EraseRect(&r)."""
+    r.left -= 1, r.right += 1, EraseRect(&r). (With 'stripes' the panes have
+    no border, those columns are theirs: outset 0, the divider's frame only.)"""
     a = Asm(addr)
     r1, r3, r4 = 1, 3, 4
     a.lha(r4, 0x42, r1)              # not r0: addi reads it as 0
-    a.addi(r4, r4, -1)
+    a.addi(r4, r4, -outset)
     a.sth(r4, 0x42, r1)
     a.lha(r4, 0x46, r1)
-    a.addi(r4, r4, 1)
+    a.addi(r4, r4, outset)
     a.sth(r4, 0x46, r1)
     a.addi(r3, r1, 0x40)
     a.bl(stubs['_EraseRect'])
@@ -719,3 +720,393 @@ def build_view_loader(addr, block, block_addr, end, done, landing):
     code = a.assemble()
     assert a.labels['next'] - a.labels['body'] == 4 * 29
     return code
+
+
+# --- 'stripes' (patch.py): a pinstriped sidebar (Panther 10.3.9).
+#
+# The sidebar view (TSidebarView) and its items fill their background with
+# the view's back color, white, in CoreGraphics: the whole view in its draw
+# (sub_16444), one item when it redraws alone (sub_ffa4) and while an item
+# is dragged (sub_18f784). Each fill calls SidebarStripes(ctx, &rect)
+# instead: 1 px rows in the window's pinstripe grays, each the gray of its
+# QuickDraw row, so the stripes are in phase with the status bar's and the
+# divider's (both erased with the toolbar brush, which QuickDraw aligns to
+# the port).
+STRIPE_GRAYS = (255, 250, 233, 250)   # by QuickDraw row % 4, with SIDEBAR_STRIPES_PHASE
+SIDEBAR_STRIPES_PHASE = 2             # measured: in phase with the status bar
+SIDEBAR_STRIPES_STUBS = ['_GetPort', '_GetPortBounds', '_CGContextSetRGBFillColor', '_CGContextFillRect']
+
+
+def build_sidebar_stripes(addr, ret1, table, stubs, phase=SIDEBAR_STRIPES_PHASE):
+    """At addr (the fake background control's draw, sub_1af134: a metal
+    leftover that draws nothing in an Aqua window): `b ret1` (an existing
+    `li r3,1 ; blr`, so that draw does nothing), then SidebarStripes:
+
+        SidebarStripes(r3 = ctx, r4 = CGRect *r)
+          row = *r with h = 1; end = r->y + r->h
+          q = bottom - 2 * top - 1 - (int) r->y + phase   (GetPortBounds(GetPort()))
+          while row.y < end: fill row with table[q & 3]; row.y += 1; q -= 1
+
+    The CG space of the QDBeginCGContext bracket is y-up from the port's
+    bottom, and the port's bounds carry the sidebar's scroll origin: bottom
+    - 2 top is the window row of CG y 0 at any scroll position (bottom - top
+    missed the scroll; bottom alone was right for even scroll offsets only).
+    table: 4 grays (STRIPE_GRAYS / 255) then 1.0, as floats.
+    Returns (bytes, SidebarStripes' address)."""
+    a = Asm(addr)
+    a.b(ret1)
+    a.label('entry')
+    a.mflr(0)
+    a.emit((47 << 26) | (28 << 21) | (1 << 16) | (-16 & 0xffff))     # stmw r28,-16(r1)
+    a.stw(0, 8, 1)
+    a.stwu(1, -0x80, 1)
+    a.mr(28, 3)                          # r28 = ctx
+    a.lswi(5, 4, 16)                     # the row rect at 0x40 = *r ...
+    a.addi(29, 1, 0x40)
+    a.stswi(5, 29, 16)
+    a.lfs(0, 0x44, 1)                    # end = y + h, at 0x50
+    a.lfs(13, 0x4c, 1)
+    a.fadds(0, 0, 13)
+    a.stfs(0, 0x50, 1)
+    a.lis(31, (table + 0x8000) >> 16)    # r31 = the gray table, then 1.0
+    a.addi(31, 31, table & 0xffff)
+    a.lfs(0, 16, 31)                     # ... 1 row high
+    a.stfs(0, 0x4c, 1)
+    a.addi(3, 1, 0x58)                   # GetPortBounds(GetPort()) -> 0x5c
+    a.bl(stubs['_GetPort'])
+    a.lwz(3, 0x58, 1)
+    a.addi(4, 1, 0x5c)
+    a.bl(stubs['_GetPortBounds'])
+    a.lha(30, 0x60, 1)                   # bottom
+    a.lha(0, 0x5c, 1)                    # - 2 * top
+    a.subf(30, 0, 30)
+    a.subf(30, 0, 30)
+    a.lfs(0, 0x44, 1)                    # - (int) y
+    a.emit((63 << 26) | (0 << 21) | (0 << 11) | (15 << 1))           # fctiwz f0,f0
+    a.emit(d_form(54, 0, 1, 0x68))                                    # stfd f0,0x68(r1)
+    a.lwz(0, 0x6c, 1)
+    a.subf(30, 0, 30)
+    a.addi(30, 30, phase - 1)
+    a.label('row')
+    a.lfs(0, 0x44, 1)
+    a.lfs(13, 0x50, 1)
+    a.fcmpu(0, 13)
+    a.bge('done')
+    a.emit((21 << 26) | (30 << 21) | (0 << 16) | (2 << 11) | (28 << 6) | (29 << 1))  # rlwinm r0,r30,2,28,29
+    a.emit((31 << 26) | (1 << 21) | (31 << 16) | (0 << 11) | (535 << 1))           # lfsx f1,r31,r0
+    a.fmr(2, 1)
+    a.fmr(3, 1)
+    a.lfs(4, 16, 31)                     # alpha 1
+    a.mr(3, 28)
+    a.bl(stubs['_CGContextSetRGBFillColor'])
+    a.mr(3, 28)
+    a.lswi(4, 29, 16)
+    a.bl(stubs['_CGContextFillRect'])
+    a.addi(30, 30, -1)                   # the next row up is one QuickDraw row higher
+    a.lfs(0, 0x44, 1)
+    a.lfs(13, 16, 31)
+    a.fadds(0, 0, 13)
+    a.stfs(0, 0x44, 1)
+    a.b('row')
+    a.label('done')
+    a.lwz(0, 0x88, 1)
+    a.addi(1, 1, 0x80)
+    a.mtlr(0)
+    a.emit((46 << 26) | (28 << 21) | (1 << 16) | (-16 & 0xffff))     # lmw r28,-16(r1)
+    a.blr()
+    return a.assemble(), a.labels['entry']
+
+
+def build_stripes_call(addr, end, ctx, rect, entry, copy_to=None, copy_reg=None, table=None, setup=()):
+    """A fill site (SetRGBFillColor + FillRect of the view's back color)
+    becomes SidebarStripes(ctx, rect): mr r3,ctx ; mr r4,rect ; bl entry ;
+    then, as the original left it, the rect copied into the copy register
+    (setup: words to emit after the call, e.g. that register's addi);
+    b end; optionally the gray table (table: bytes) right after it.
+    Padded with nops to end. Returns (bytes, the table's address or None)."""
+    a = Asm(addr)
+    a.mr(3, ctx)
+    a.mr(4, rect)
+    a.bl(entry)
+    for w in setup:
+        a.emit(w)
+    if copy_reg is not None:
+        a.lswi(5, rect, 16)
+        a.stswi(5, copy_reg, 16)
+    a.b(end)
+    where = None
+    if table is not None:
+        where = a.pc
+        a.data(table)
+    code = a.assemble()
+    assert len(code) <= end - addr, 'stripes call at %x does not fit' % addr
+    return code + struct.pack('>I', 0x60000000) * ((end - addr - len(code)) // 4), where
+
+
+def build_refresh_thunk(addr, refresh_slot):
+    """TSidebarView's ScrollBits (patch.py 'stripes'): this->Refresh(), as a
+    tail call. PowerPlant's ScrollImageBy copied the sidebar's pixels and
+    redrew only the exposed strip, so the copied stripes moved with the items
+    (a row is 18 or 34 px: 2 rows out of phase); now the sidebar redraws."""
+    a = Asm(addr)
+    a.lwz(12, 0, 3)
+    a.lwz(12, refresh_slot, 12)
+    a.emit(0x7d8903a6)                   # mtctr r12
+    a.emit(0x4e800420)                   # bctr
+    return a.assemble()
+
+
+def build_centered_draw(addr, end):
+    """The divider draw's x centering (a no-op with 'stripes': the image is as
+    wide as the frame), from lfs f12... to before the clip's lswi, becomes:
+
+        r28 = r1 + 0x90 = a copy of the divider rect (r29 = 0x70): the clip
+        image y = y + round(h/2) - image height/2      (f0 = 0.5, f9 = the
+            image height, f31 = 2^52: + f31 - f31 rounds a double >= 0 to an
+            integer, so an odd height doesn't put the icon on a half pixel;
+            y keeps its own fraction, x.5 for odd port heights)
+
+    so the image's middle rows (the arrow, grip.py) sit at the divider's
+    middle. The clip's lswi must then read r28 (patch.py)."""
+    a = Asm(addr)
+    a.addi(28, 1, 0x90)
+    a.lswi(5, 29, 16)
+    a.stswi(5, 28, 16)
+    a.lwz(3, 0x44, 1)                    # ctx
+    a.lfs(12, 0x7c, 1)                   # h
+    a.fmuls(13, 12, 0)                   # h/2
+    a.emit((63 << 26) | (13 << 21) | (13 << 16) | (31 << 11) | (21 << 1))   # fadd f13,f13,f31
+    a.emit((63 << 26) | (13 << 21) | (13 << 16) | (31 << 11) | (20 << 1))   # fsub f13,f13,f31
+    a.fmuls(11, 9, 0)                    # image height / 2
+    a.fsubs(13, 13, 11)
+    a.lfs(11, 0x74, 1)                   # + y
+    a.fadds(13, 13, 11)
+    a.stfs(13, 0x74, 1)
+    code = a.assemble()
+    assert len(code) <= end - addr
+    return code + struct.pack('>I', 0x60000000) * ((end - addr - len(code)) // 4)
+
+
+# --- 'stripes' on Tiger 10.4.11 (patch.py TIGER_STRIPES_PATCHES).
+#
+# The sidebar view's draw (sub_79c40) fills the dirty part of its bounds with
+# its back color, white, in sub_3f6e4 (only the sidebar calls it), then draws
+# the items over it. That CGContextFillRect goes to SideFill instead, which
+# stripes the rect. Stripes are 1 px rows in STRIPE_GRAYS by window row
+# (HIViewConvertPoint to the window's root view), so they keep their place
+# whatever the view and its scroll position, in phase with the status bar's
+# (cave.build_tiger_bar, PINSTRIPES from its top row).
+#
+# The splitter's divider (7 px, the stock width) is drawn as Panther's
+# (grip.py STRIPES_*): the splitter's left part (the sidebar's margins and the
+# divider) striped, a soft shadow falling left from a 163 line by the files,
+# and the small arrow at the divider's middle height.
+TIGER_STRIPES_STUBS = ['_HIViewConvertPoint', '_CGContextSetRGBFillColor', '_CGContextFillRect']
+TIGER_STRIPES_PHASE = 0               # measured: in phase with the status bar
+
+
+def _fctiwz(a, ft, fb): a.emit((63 << 26) | (ft << 21) | (fb << 11) | (15 << 1))
+def _stfd(a, fs, d, ra): a.emit(d_form(54, fs, ra, d))
+def _rlwinm(a, ra, rs, sh, mb, me): a.emit((21 << 26) | (rs << 21) | (ra << 16) | (sh << 11) | (mb << 6) | (me << 1))
+def _lfsx(a, ft, ra, rb): a.emit((31 << 26) | (ft << 21) | (ra << 16) | (rb << 11) | (535 << 1))
+def _stmw(a, rs, d, ra): a.emit(d_form(47, rs, ra, d))
+def _lmw(a, rt, d, ra): a.emit(d_form(46, rt, ra, d))
+
+
+TIGER_HIVIEW = 0x48                   # a Finder view object's HIViewRef (see sub_13d48)
+TIGER_SIDEBAR_VTABLE = 0x3a81d8       # the sidebar view's vtable (its Draw, slot 0xe4: sub_3f6e4)
+TIGER_SCROLL_OPAQUE = 0x2e50c         # sub_2e50c(obj): the view's opaque feature bit
+
+
+def build_tiger_stripes(cave, stubs, phase=TIGER_STRIPES_PHASE, vtable=TIGER_SIDEBAR_VTABLE):
+    """cave: where the routines go (constants first). Entry points:
+      stripes(ctx r3, CGRect *r4, view r5): r4's rows striped (view coords;
+        r5 a Finder view object, its HIViewRef at TIGER_HIVIEW)
+      sidefill(ctx r3, rect r4..r7 by value): stands in for sub_3f6e4's
+        CGContextFillRect; the view is the caller's r28
+      itemfill: the same for sub_16de60's (an item, while one is dragged),
+        the view in r30
+      divider(view r3, ctx r4): stands in for the splitter Draw's call of
+        sub_3f304 (see build_tiger_divider)
+    Returns (bytes, {'sidefill': addr, 'divider': addr})."""
+    import grip
+    W = grip.STRIPES_WIDTH
+    cols = [(float(W - 1), grip.STRIPES_LINE / 255.0, 1.0)]
+    cols += [(float(W - 2 - i), 0.0, a) for i, a in enumerate(grip.STRIPES_SHADOW)]
+    pix = []
+    for dy, row in enumerate(grip.STRIPES_ARROW):
+        for dx, p in enumerate(row):
+            if p:
+                pix.append((float(dx), float(dy), p[0] / 255.0, p[1] / 255.0 if p[1] > 1 else p[1]))
+    half = len(grip.STRIPES_ARROW) // 2
+    consts = struct.pack('>4f', *[g / 255.0 for g in STRIPE_GRAYS])          # 0  TAB
+    consts += struct.pack('>4f', 1.0, 4096.0 + phase, 8388608.0, 0.5)      # 16 ONE BIAS BIG HALF
+    consts += struct.pack('>2f', 0.0, float(half))                          # 32 ZERO HALFA
+    COLS = len(consts)
+    for c in cols:
+        consts += struct.pack('>3f', *c)
+    PIX = len(consts)
+    for p in pix:
+        consts += struct.pack('>4f', *p)
+    END = len(consts)
+    TAB, ONE, BIAS, BIG, HALF, ZERO, HALFA = 0, 16, 20, 24, 28, 32, 36
+    a = Asm(cave)
+    a.data(consts)
+    hi, lo = (cave + 0x8000) >> 16, cave & 0xffff
+    K = 31                                  # r31 = constants, in every routine
+
+    def prologue(size):
+        a.mflr(0)
+        _stmw(a, 26, -24, 1)
+        a.stw(0, 8, 1)
+        a.stwu(1, -size, 1)
+        a.lis(K, hi)
+        a.addi(K, K, lo)
+
+    def epilogue(size):
+        a.lwz(0, size + 8, 1)
+        a.addi(1, 1, size)
+        a.mtlr(0)
+        _lmw(a, 26, -24, 1)
+        a.blr()
+
+    def fill(ctx, rect_off, gray_reg_off=None):
+        pass
+
+    # stripes(ctx, rect*, view); frame 0x80: 0x40 row {x,y,w,h}, 0x50 end,
+    # 0x58 point, 0x60 fctiwz; 0x68.. the saved r26..r31
+    a.label('stripes')
+    prologue(0x80)
+    a.mr(28, 3)
+    a.lswi(6, 4, 16)                        # (r4 is the base: load into r6..r9)
+    a.addi(29, 1, 0x40)
+    a.stswi(6, 29, 16)
+    a.lfs(0, 0x44, 1); a.lfs(13, 0x4c, 1); a.fadds(0, 0, 13); a.stfs(0, 0x50, 1)
+    a.lfs(0, ONE, K); a.stfs(0, 0x4c, 1)    # rows 1 high
+    a.lfs(0, ZERO, K); a.stfs(0, 0x58, 1); a.stfs(0, 0x5c, 1)
+    a.addi(3, 1, 0x58)
+    a.lwz(4, TIGER_HIVIEW, 5)               # the object's HIViewRef
+    a.li(5, 0)
+    a.bl(stubs['_HIViewConvertPoint'])      # (0, 0) in the window's root view
+    a.lfs(0, 0x44, 1); a.lfs(13, 0x5c, 1); a.fadds(0, 0, 13)
+    a.lfs(13, BIAS, K); a.fadds(0, 0, 13)
+    _fctiwz(a, 0, 0)
+    _stfd(a, 0, 0x60, 1)
+    a.lwz(30, 0x64, 1)                      # r30 = window row + bias
+    a.label('row')
+    a.lfs(0, 0x44, 1); a.lfs(13, 0x50, 1); a.fcmpu(0, 13)
+    a.bge('sdone')
+    _rlwinm(a, 0, 30, 2, 28, 29)            # (row & 3) * 4
+    _lfsx(a, 1, K, 0)
+    a.fmr(2, 1); a.fmr(3, 1); a.lfs(4, ONE, K)
+    a.mr(3, 28)
+    a.bl(stubs['_CGContextSetRGBFillColor'])
+    a.mr(3, 28)
+    a.lswi(4, 29, 16)
+    a.bl(stubs['_CGContextFillRect'])
+    a.addi(30, 30, 1)
+    a.lfs(0, 0x44, 1); a.lfs(13, ONE, K); a.fadds(0, 0, 13); a.stfs(0, 0x44, 1)
+    a.b('row')
+    a.label('sdone')
+    epilogue(0x80)
+
+    # sidefill(ctx r3, rect r4..r7), view = the caller's r28 (sub_3f6e4,
+    # the sidebar's Draw: its back color fill), and itemfill, view = r30
+    # (sub_16de60: an item's back color fill, while an item is dragged):
+    # the sidebar's only (sub_3f6e4 is also the column view's columns' Draw)
+    for label, view in (('sidefill', 28), ('itemfill', 30)):
+        a.label(label)
+        a.lwz(0, 0, view)
+        a.lis(12, (vtable + 0x8000) >> 16)
+        a.addi(12, 12, vtable & 0xffff)
+        a.cmpw(0, 12)
+        a.beq(label + '_mine')
+        a.b(stubs['_CGContextFillRect'])
+        a.label(label + '_mine')
+        a.mflr(0)
+        a.stw(0, 8, 1)
+        a.stwu(1, -0x60, 1)
+        a.addi(9, 1, 0x40)
+        a.stswi(4, 9, 16)
+        a.mr(4, 9)
+        a.mr(5, view)
+        a.bl('stripes')
+        a.lwz(0, 0x68, 1)
+        a.addi(1, 1, 0x60)
+        a.mtlr(0)
+        a.blr()
+
+    # divider(view r3, ctx r4); frame 0xa0: 0x40 divider rect, 0x50 fill rect, 0x60 arrow top
+    a.label('divider')
+    prologue(0xa0)
+    a.mr(27, 3)                             # view
+    a.mr(28, 4)                             # ctx
+    a.bl(TIGER_BAR_FILL)                    # the splitter's own background
+    a.addi(9, 27, TIGER_DIVIDER_RECT)
+    a.lswi(4, 9, 16)
+    a.addi(29, 1, 0x40)
+    a.stswi(4, 29, 16)
+    # the left part, striped: {0, y, x + w, h}
+    a.lfs(0, ZERO, K); a.stfs(0, 0x50, 1)
+    a.lfs(0, 0x44, 1); a.stfs(0, 0x54, 1)
+    a.lfs(0, 0x40, 1); a.lfs(13, 0x48, 1); a.fadds(0, 0, 13); a.stfs(0, 0x58, 1)
+    a.lfs(0, 0x4c, 1); a.stfs(0, 0x5c, 1)
+    a.mr(3, 28)
+    a.addi(4, 1, 0x50)
+    a.mr(5, 27)
+    a.bl('stripes')
+    # columns: {x + dx, y, 1, h} in (gray, alpha)
+    a.lfs(0, ONE, K); a.stfs(0, 0x58, 1)
+    a.addi(26, K, COLS)
+    a.label('col')
+    a.lfs(0, 0x40, 1); a.lfs(13, 0, 26); a.fadds(0, 0, 13); a.stfs(0, 0x50, 1)
+    a.lfs(1, 4, 26); a.fmr(2, 1); a.fmr(3, 1); a.lfs(4, 8, 26)
+    a.mr(3, 28)
+    a.bl(stubs['_CGContextSetRGBFillColor'])
+    a.mr(3, 28)
+    a.addi(9, 1, 0x50)
+    a.lswi(4, 9, 16)
+    a.bl(stubs['_CGContextFillRect'])
+    a.addi(26, 26, 12)
+    a.addi(9, K, PIX)
+    a.cmpw(26, 9)
+    a.bne('col')
+    # the arrow: top = y + round(h/2) - half; pixels {x + dx, top + dy, 1, 1}
+    a.lfs(0, 0x4c, 1); a.lfs(13, HALF, K); a.fmuls(0, 0, 13)
+    a.lfs(13, BIG, K); a.fadds(0, 0, 13); a.fsubs(0, 0, 13)
+    a.lfs(13, 0x44, 1); a.fadds(0, 0, 13)
+    a.lfs(13, HALFA, K); a.fsubs(0, 0, 13)
+    a.stfs(0, 0x60, 1)
+    a.lfs(0, ONE, K); a.stfs(0, 0x5c, 1)
+    a.label('pix')
+    a.lfs(0, 0x40, 1); a.lfs(13, 0, 26); a.fadds(0, 0, 13); a.stfs(0, 0x50, 1)
+    a.lfs(0, 0x60, 1); a.lfs(13, 4, 26); a.fadds(0, 0, 13); a.stfs(0, 0x54, 1)
+    a.lfs(1, 8, 26); a.fmr(2, 1); a.fmr(3, 1); a.lfs(4, 12, 26)
+    a.mr(3, 28)
+    a.bl(stubs['_CGContextSetRGBFillColor'])
+    a.mr(3, 28)
+    a.addi(9, 1, 0x50)
+    a.lswi(4, 9, 16)
+    a.bl(stubs['_CGContextFillRect'])
+    a.addi(26, 26, 16)
+    a.addi(9, K, END)
+    a.cmpw(26, 9)
+    a.bne('pix')
+    epilogue(0xa0)
+
+    # opaque(obj r3): stands in for the scroll handler's call of sub_2e50c
+    # (sub_2e290: may the view scroll by copying its pixels?): never for the
+    # sidebar, which then redraws whole, so its stripes stay with the window
+    a.label('opaque')
+    a.lwz(0, 0, 3)
+    a.lis(12, (vtable + 0x8000) >> 16)
+    a.addi(12, 12, vtable & 0xffff)
+    a.cmpw(0, 12)
+    a.beq('op_mine')
+    a.b(TIGER_SCROLL_OPAQUE)
+    a.label('op_mine')
+    a.li(3, 0)
+    a.blr()
+    code = a.assemble()
+    return code, {'sidefill': a.labels['sidefill'], 'itemfill': a.labels['itemfill'], 'sdivider': a.labels['divider'],
+                  'sopaque': a.labels['opaque']}

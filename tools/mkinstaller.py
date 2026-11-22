@@ -4,6 +4,8 @@ components (files are recognised by fingerprint, so one script serves both):
 
   finder     Aqua (non-brushed-metal) Finder windows with toolbar + sidebar,
              and the status bar under the toolbar (Jaguar)
+  stripes    option for finder: a pinstriped sidebar with a slim, shadowed
+             divider (patch.py 'stripes'; on Panther also grip.py stripes)
   titlebars  Jaguar's pinstriped, translucent title bars (theme Extras.rsrc,
              plus AppKit so Cocoa windows can show the translucency)
   logo       Jaguar branding: the Garamond "Mac OS X" wordmark in About This
@@ -85,7 +87,7 @@ def edit_lines(a, b):
 
 from macho import MachO
 
-def text_region(path, a, b):
+def text_region(path, a, b, outside=()):
     """4 KiB-aligned block span covering __TEXT from its first section on.
     update_prebinding rewrites the header/load commands and __DATA pointers
     but never the code, so this identifies a Finder build however often it
@@ -103,10 +105,22 @@ def text_region(path, a, b):
     count = (seg['fileoff'] + seg['filesize']) // 4096 - skip
     lo, hi = skip * 4096, (skip + count) * 4096
     for off, chunk in runs(a, b):
-        assert lo <= off and off + len(chunk) <= hi, 'patch outside identification region'
+        if lo <= off and off + len(chunk) <= hi:
+            continue
+        # only the edits patch.stripes_outside_text names may lie outside (they
+        # sit at the same offsets in every 10.3.9 copy; not verified by WANT)
+        assert any(o <= off and off + len(chunk) <= o + n for o, n in outside), 'patch outside identification region'
     return skip, count, md5(a[lo:hi]), md5(b[lo:hi])
 
 entries = []   # (component, key, label, skip, count, orig md5, patched md5, edit lines)
+# The Finder and its resources come in two styles: plain (the default) and,
+# with the optional 'stripes' set, the pinstriped sidebar. Both
+# styles share a key (so one backup); the stripes edits are listed under
+# <key>stripes. styled: (component, key, label, skip, count, orig, plain md5,
+# stripes md5 or None)
+assert patch.STRIPES_WIDTH == grip.STRIPES_WIDTH
+STRIPES_BUILDS = ('10.3.9', '10.4.11')
+styled = []
 for ver, rel in FINDER_BUILDS:
     src = os.path.join(ROOT, rel)
     key, lbl = 'finder' + ver.replace('.', ''), 'Finder ' + ver
@@ -116,12 +130,25 @@ for ver, rel in FINDER_BUILDS:
     b = open(out, 'rb').read()
     skip, count, mo, mp = text_region(src, a, b)
     entries.append(('finder', key, lbl, skip, count, mo, mp, edit_lines(a, b)))
+    ms = None
+    if ver in STRIPES_BUILDS:
+        out = os.path.join(ROOT, 'build', 'Finder-%s-stripes' % ver)
+        patch.apply(src, out, patch.SET_NAMES + ['stripes'], quiet=True)
+        b = open(out, 'rb').read()
+        sk2, cn2, mo2, ms = text_region(src, a, b, patch.stripes_outside_text(MachO(src)))
+        assert (sk2, cn2, mo2) == (skip, count, mo)
+        entries.append(('finder', key + 'stripes', lbl + ', pinstriped sidebar', skip, count, mo, ms, edit_lines(a, b)))
+    styled.append(('finder', key, lbl, skip, count, mo, mp, ms))
 
 # The Finder's resources: the sidebar divider's image, the column view's
-# divider instead of the metal dimple (installed and restored with the Finder).
+# divider instead of the metal dimple, or the pinstriped sidebar's (installed
+# and restored with the Finder).
 a = open(os.path.join(ROOT, GRIP_SRC), 'rb').read()
 b = grip.build(a)
 entries.append(('grip', 'finderrsrc', 'Finder images', 0, 0, md5(a), md5(b), edit_lines(a, b)))
+c = grip.build(a, stripes=True)
+entries.append(('grip', 'finderrsrcstripes', 'Finder images, pinstriped sidebar', 0, 0, md5(a), md5(c), edit_lines(a, c)))
+styled.append(('grip', 'finderrsrc', 'Finder images', 0, 0, md5(a), md5(b), md5(c)))
 
 import contextlib, io
 # Tiger's title bar, toolbar and spinner art is Panther's (byte for byte), so
@@ -191,10 +218,45 @@ def ident_block(comp):
                     out.append('  case "$R" in')
         out.append('  esac')
     return '\n'.join(out)
-known_finder = ident_block('finder')
+def styled_ident(comp):
+    """identify_<comp> for a file with two styles: STYLE = the style found
+    (plain or stripes), STATE as usual; then style_target picks WANT/EDITKEY
+    for FINDER_STYLE (keep = the style found, plain for an original file). A
+    file patched in the other style counts as oldpatch, so install re-patches
+    it from the backup. Older releases' fingerprints (tools/released.txt) are
+    plain (the old 'top' status bar option was folded into plain)."""
+    out = []
+    for c, key, lbl, skip, count, o, hp, hs in styled:
+        if c != comp: continue
+        spans = {}   # (skip, count) -> [(md5, style)]
+        for k, sk, cn, h in released:
+            if k in (key, key + 'top', key + 'stripes') and h not in (hp, hs):
+                spans.setdefault((sk, cn), []).append((h, 'stripes' if k.endswith('stripes') else 'plain'))
+        out.append('  HP=%s; HS=%s' % (hp, hs or ''))
+        out.append('  R=$(region "$1" %d %d)' % (skip, count))
+        out.append('  case "$R" in')
+        out.append('    %s) STATE=original ;;' % o)
+        # a file with one style (no stripes build) reports none
+        sty = (lambda st: '; STYLE=%s' % st) if hs else (lambda st: '')
+        out.append('    %s) STATE=patched%s ;;' % (hp, sty('plain')))
+        if hs:
+            out.append('    %s) STATE=patched; STYLE=stripes ;;' % hs)
+        for h, st in spans.pop((skip, count), []):
+            out.append('    %s) STATE=oldpatch%s ;;' % (h, sty(st)))
+        out.append('  esac')
+        for (sk, cn), hs_ in spans.items():   # older releases hashed a different span
+            out.append('  [ "$STATE" = unknown ] && case "$(region "$1" %d %d)" in' % (sk, cn))
+            for h, st in hs_:
+                out.append('    %s) STATE=oldpatch%s ;;' % (h, sty(st)))
+            out.append('  esac')
+        out.append('  if [ "$STATE" != unknown ]; then')
+        out.append("    KEY=%s; LABEL='%s'; SKIP=%d; COUNT=%d; ORIG=%s; style_target; return" % (key, lbl, skip, count, o))
+        out.append('  fi')
+    return '\n'.join(out)
+known_finder = styled_ident('finder')
 known_theme, known_appkit = ident_block('titlebars'), ident_block('appkit')
 known_logo = ident_block('logo')
-known_grip = ident_block('grip')
+known_grip = styled_ident('grip')
 logo_paths = ' '.join(p for k, l, p, s in LOGO_FILES)
 assert ' ' not in ''.join(p for k, l, p, s in LOGO_FILES), 'LOGO_FILES is word-split in sh'
 edits = '\n'.join("  %s)\n%s\n    ;;" % (key, e) for c, key, lbl, sk, cn, o, n, e in entries)
@@ -206,6 +268,8 @@ script = r'''#!/bin/sh
 #              the status bar under the toolbar as in Jaguar, and a sidebar divider
 #              drawn like the column view's (plus the Finder's resources: the
 #              divider's image)
+#   stripes    option for finder: a pinstriped sidebar with a slim, shadowed
+#              divider (restore stripes puts the plain sidebar back)
 #   titlebars  Jaguar-style pinstriped, translucent window title bars
 #              (the HIToolbox theme, plus AppKit so Cocoa windows blend too)
 #
@@ -213,8 +277,10 @@ script = r'''#!/bin/sh
 #   logo       Jaguar branding: Garamond "Mac OS X" in About This Mac and the
 #              login panel, and Jaguar's Finder icon in the Finder and Dock
 #
-#   sudo sh aquafinder.sh install [finder|titlebars|logo]   (default: all)
-#   sudo sh aquafinder.sh restore [finder|titlebars|logo]   (default: all)
+#   sudo sh aquafinder.sh install [finder|stripes|titlebars|logo]   (default: all)
+#   sudo sh aquafinder.sh restore [finder|stripes|titlebars|logo]   (default: all)
+#
+# install finder (and install all) keeps the Finder's current sidebar style.
 #
 # Only recognised files are touched (the Finder is identified by its code
 # section, so re-prebinding by Software Update doesn't matter). Each is backed up, patched
@@ -249,14 +315,21 @@ region() {   # region <file> <skip> <count>: md5 of 4 KiB blocks, or whole file 
 
 identify() {   # identify <file> <component>: sets KEY LABEL STATE SKIP COUNT WANT ORIG CUR
   [ -f "$1" ] || die "missing $1"
-  KEY=; LABEL=; STATE=unknown; CUR=$(sum "$1")
+  KEY=; LABEL=; STATE=unknown; STYLE=; EDITKEY=; SWITCH=; CUR=$(sum "$1")
   case "$2" in
-    finder)    identify_finder "$1" ;;
+    finder|stripes) identify_finder "$1" ;;
     titlebars) identify_theme "$1" ;;
     appkit)    identify_appkit "$1" ;;
     grip)      identify_grip "$1" ;;
     logo)      identify_logo "$1" ;;
   esac
+}
+style_name() { case "$1" in stripes) echo pinstriped ;; *) echo "$1" ;; esac; }
+style_target() {   # WANT/EDITKEY for FINDER_STYLE (plain|stripes|keep) given the STYLE found
+  W="${FINDER_STYLE:-keep}"; [ "$W" = keep ] && W="${STYLE:-plain}"
+  [ -z "$HS" ] && W=plain                           # no stripes build of this file
+  if [ "$W" = stripes ]; then WANT=$HS; EDITKEY=${KEY}stripes; else WANT=$HP; EDITKEY=$KEY; fi
+  if [ "$STATE" = patched ] && [ "${STYLE:-plain}" != "$W" ]; then STATE=oldpatch; SWITCH=$W; fi
 }
 identify_finder() {
 __KNOWN_FINDER__
@@ -302,7 +375,8 @@ install_one() {   # install_one <file> <name>
     oldpatch)
       # patched by an older Aquafinder: re-patch starting from the saved original
       find_backup "$F" || { echo "$2: patched by an older Aquafinder, but its original backup is missing; skipped."; return 1; }
-      SRC="$BK"; HOW="updated from an older Aquafinder" ;;
+      SRC="$BK"; HOW="updated from an older Aquafinder"
+      [ -n "$SWITCH" ] && HOW="switched to the $(style_name $SWITCH) sidebar" ;;
     original)
       mkdir -p "$BACKUP_DIR" || die "cannot create $BACKUP_DIR"
       BK="$BACKUP_DIR/${F##*/}-$KEY.orig"
@@ -313,7 +387,7 @@ install_one() {   # install_one <file> <name>
   esac
   swap_in "$F" "$F"                                 # copy keeps owner and mode
   [ "$SRC" = "$F" ] || cat "$SRC" > "$TMP" || die "cannot copy $SRC"
-  apply_edits "$KEY"
+  apply_edits "${EDITKEY:-$KEY}"
   [ "$(region "$TMP" $SKIP $COUNT)" = "$WANT" ] || die "$2: patched copy failed verification; nothing changed."
   mv -f "$TMP" "$F" || die "could not replace $F"; TMP=
   echo "$2: $HOW ($LABEL). Backup: $BK"
@@ -337,7 +411,7 @@ status_one() {
   identify "$1" "$2"
   case "$STATE" in
     original) echo "$2: original ($LABEL)" ;;
-    patched)  echo "$2: Aquafinder installed ($LABEL)" ;;
+    patched)  echo "$2: Aquafinder installed ($LABEL${STYLE:+, $(style_name $STYLE) sidebar})" ;;
     oldpatch) echo "$2: older Aquafinder installed ($LABEL); run install to update" ;;
     *)        echo "$2: not recognised (md5 $CUR)" ;;
   esac
@@ -348,9 +422,40 @@ need_root() {
   [ "$(id -u)" = 0 ] || die "run with sudo: sudo sh $0 $*"
 }
 
+finder_style() {   # FINDER_STYLE for install finder: the installed Finder's (plain if none)
+  [ -n "$FINDER_STYLE" ] && return 0
+  identify "$FINDER" finder; FINDER_STYLE="${STYLE:-plain}"
+}
+
+install_finder() {   # install_finder <finder|stripes>: the Finder and (Panther) its resources, in FINDER_STYLE
+  finder_style
+  install_one "$FINDER" "$1" || RC=1
+  [ -n "$TIGER" ] || install_one "$GRIP" grip || RC=1
+  FINDER_STYLE=
+}
+
+stripes_off() {   # restore stripes: a pinstriped sidebar goes back to the plain one
+  identify "$FINDER" finder
+  case "$STATE" in
+    original|unknown) echo "stripes: off (the Aqua Finder isn't installed)."; return 0 ;;
+  esac
+  [ "$STYLE" = stripes ] || { echo "stripes: already off ($LABEL)."; return 0; }
+  FINDER_STYLE=plain; install_finder stripes
+}
+
+status_stripes() {   # one line for the option: installed = the pinstriped sidebar
+  identify "$FINDER" finder
+  case "$STATE" in
+    unknown) echo "stripes: not recognised (md5 $CUR)" ;;
+    original) echo "stripes: original (Aqua Finder not installed)" ;;
+    *) if [ "$STYLE" = stripes ]; then echo "stripes: Aquafinder installed (pinstriped sidebar)"
+       else echo "stripes: original (plain sidebar)"; fi ;;
+  esac
+}
+
 finish() {
   [ -n "$NO_RESTART" ] && return 0
-  case "$CHANGED" in *finder*|*grip*)
+  case "$CHANGED" in *finder*|*grip*|*stripes*)
     # no killall without the optional BSD Subsystem; ps is in /bin
     for P in $(ps -axc | awk '$NF == "Finder" {print $1}'); do kill "$P" 2>/dev/null; done
     echo "Finder restarted." ;;
@@ -369,29 +474,32 @@ finish() {
 }
 
 WHAT="${2:-all}"
-case "$WHAT" in finder|titlebars|logo|all) ;; *) echo "unknown component: $WHAT"; exit 1 ;; esac
+case "$WHAT" in finder|stripes|titlebars|logo|all) ;; *) echo "unknown component: $WHAT"; exit 1 ;; esac
 want() { [ "$WHAT" = all ] || [ "$WHAT" = "$1" ]; }
 CHANGED=; RC=0
 case "$1" in
   install)
     need_root install
-    want finder    && { install_one "$FINDER" finder || RC=1; [ -n "$TIGER" ] || install_one "$GRIP" grip || RC=1; }
+    want finder    && install_finder finder
+    [ "$WHAT" = stripes ] && { FINDER_STYLE=stripes; install_finder stripes; }
     want titlebars && { install_one "$THEME" titlebars || RC=1; install_one "$APPKIT" appkit || RC=1; }
     want logo      && for F in $LOGO_FILES; do [ -f "$F" ] || continue; install_one "$F" logo || RC=1; done
     finish ;;
   restore|uninstall)
     need_root restore
     want finder    && { restore_one "$FINDER" finder || RC=1; [ -n "$TIGER" ] || restore_one "$GRIP" grip || RC=1; }
+    [ "$WHAT" = stripes ] && { stripes_off || RC=1; }
     want titlebars && { restore_one "$THEME" titlebars || RC=1; restore_one "$APPKIT" appkit || RC=1; }
     want logo      && for F in $LOGO_FILES; do [ -f "$F" ] || continue; restore_one "$F" logo || RC=1; done
     finish ;;
   status|"")
     status_one "$FINDER" finder
     [ -n "$TIGER" ] || status_one "$GRIP" grip
+    status_stripes
     status_one "$THEME" titlebars
     status_one "$APPKIT" appkit
     for F in $LOGO_FILES; do [ -f "$F" ] && status_one "$F" logo; done ;;
-  *) echo "usage: sudo sh $0 [status|install|restore] [finder|titlebars|logo]"; exit 1 ;;
+  *) echo "usage: sudo sh $0 [status|install|restore] [finder|stripes|titlebars|logo]"; exit 1 ;;
 esac
 exit $RC
 '''

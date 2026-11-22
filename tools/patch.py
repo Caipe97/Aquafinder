@@ -158,6 +158,10 @@ VIEW_IDS_NEW = (8600, 8606, 8612)
 VIEW_IMAGES = 18
 VIEW_ANCHORS = [VIEW_LOADER_LAST, VIEW_LOADER_LANDING, VIEW_LOADER_DONE, VIEW_DRAW_IDS]
 SET_NAMES = ['nometal', 'square', 'statusbar', 'gap', 'shadow', 'softlines', 'slimbar', 'topbar', 'toolbar', 'barupdate']
+# 'stripes', off by default (an option of the finder part): a pinstriped
+# sidebar with a slim, shadowed divider: Panther 10.3.9 (STRIPES_*) and Tiger
+# 10.4.11 (TIGER_STRIPES_PATCHES).
+OPTIONAL_SET_NAMES = ['stripes']
 
 # Tiger 10.4.11 (8S165). Its Finder was largely rewritten (C++, HIView), so
 # the 10.3.9 signatures don't find these: they are its own addresses, used
@@ -240,6 +244,25 @@ TIGER_PATCHES = [
     ('softlines', 0x1b85d0, 0x3884d288, ('addi_cave', 'line'), 'path pane frame: stroke color 158 gray -> 212 (RGBA)'),
 ]
 TIGER_SET_NAMES = ['nometal', 'square', 'topbar', 'shadow', 'gap', 'softlines']
+# 'stripes' on Tiger (cave.build_tiger_stripes): the sidebar's back color
+# fills (its Draw, sub_3f6e4, and an item's while one is dragged, sub_16de60)
+# stripe instead; scrolling redraws it instead of copying its pixels; the
+# sidebar's margins in the splitter, and the file pane's left and top ones,
+# go (the splitter's left part is striped under them); the divider keeps its
+# stock 7 px and is drawn as Panther's stripes divider.
+TIGER_STRIPES_PATCHES = [
+    ('stripes', 0x3f7bc, 0x481b3c05, ('bl_cave', 'sidefill'), 'sidebar draw: back color fill -> bl <SideFill> (pinstripes)'),
+    ('stripes', 0x16deb8, 0x48085509, ('bl_cave', 'itemfill'), 'sidebar item draw (dragging): back color fill -> bl <ItemFill> (pinstripes)'),
+    ('stripes', 0x2e424, 0x480000e9, ('bl_cave', 'sopaque'), 'scroll: bl opaque? -> bl <never for the sidebar> (redraw, no pixel copy)'),
+    ('stripes', 0x2d3f4, 0xc022d434, 0xc022d41c, 'splitter init: sidebar margins 1.0 -> 0.0'),
+    ('stripes', 0x2d400, 0xc082d454, 0xc082d41c, 'splitter init: sidebar bottom margin 2.0 -> 0.0'),
+    ('stripes', 0x2d418, 0xc022d434, 0xc022d41c, 'splitter init: file pane left and top margins 1.0 -> 0.0'),
+]
+# 'gap' entries that 'stripes' replaces (None: left as it is)
+TIGER_STRIPES_OVERRIDES = {
+    0x2d924: None,                                  # divider width: the stock 7.0
+    0x3f24c: ('bl_cave', 'sdivider'),               # the stripes divider
+}
 
 
 def is_tiger(m):
@@ -252,22 +275,27 @@ def is_tiger(m):
 
 def place_tiger_cave(m, data, names, quiet):
     """Write the routines of the sets in `names` ('shadow': cave.build_tiger_bar,
-    'gap': cave.build_tiger_divider; 'softlines': cave.build_tiger_line, its
-    constants only) into the free space at the end of __TEXT, one after the
-    other; returns {'bar': entry, 'divider': entry, 'line': RGBA gray,
-    'line_gray': float gray}."""
+    'gap': cave.build_tiger_divider, or with 'stripes' cave.build_tiger_stripes
+    instead; 'softlines': cave.build_tiger_line, its constants only) into the
+    free space at the end of __TEXT, one after the other; returns {'bar':
+    entry, 'divider': entry, 'line': RGBA gray, 'line_gray': float gray, and
+    with 'stripes' its entries: 'sidefill', 'itemfill', 'sdivider', 'sopaque'}."""
     import cave
     last = max(x['addr'] + x['size'] for x in m.sections if x['seg'] == '__TEXT')
     seg = [x for x in m.segments if x['name'] == '__TEXT'][0]
     end = seg['vmaddr'] + seg['filesize']
-    stubs = {nm: stub_addr(m, nm) for nm in cave.TIGER_BAR_STUBS}
+    stubs = {nm: stub_addr(m, nm) for nm in cave.TIGER_BAR_STUBS + cave.TIGER_STRIPES_STUBS}
     caddr, entries = (last + 15) & ~15, {}
     for key, setname, build in (('bar', 'shadow', cave.build_tiger_bar),
                                 ('divider', 'gap', cave.build_tiger_divider),
-                                ('line', 'softlines', cave.build_tiger_line)):
-        if setname not in names:
+                                ('line', 'softlines', cave.build_tiger_line),
+                                ('stripes', 'stripes', cave.build_tiger_stripes)):
+        if setname not in names or (key == 'divider' and 'stripes' in names):
             continue
         code, entries[key], *data_addr = build(caddr, stubs)
+        if isinstance(entries[key], dict):
+            entries.update(entries[key])
+            entries[key] = min(entries[key].values())
         if data_addr:
             entries[key + '_gray'] = data_addr[0]
         coff = m.addr2off(caddr)
@@ -285,11 +313,25 @@ def place_tiger_cave(m, data, names, quiet):
 
 def apply_tiger(m, path_out, names, quiet):
     data = bytearray(m.data)
+    stripes = 'stripes' in names
+    if stripes:
+        import cave
+        assert all(n in names for n in ('gap', 'topbar', 'shadow')), "'stripes' needs 'gap', 'topbar' and 'shadow'"
+        vt = m.addr2off(cave.TIGER_SIDEBAR_VTABLE + 0xe4)
+        assert struct.unpack_from('>I', m.data, vt)[0] == 0x3f6e4, 'sidebar vtable not found'
     entries = place_tiger_cave(m, data, names, quiet)
-    for name, addr, expect, new, why in TIGER_PATCHES:
+    for name, addr, expect, new, why in TIGER_PATCHES + TIGER_STRIPES_PATCHES:
         if name not in names:
             continue
+        if stripes and addr in TIGER_STRIPES_OVERRIDES:
+            new = TIGER_STRIPES_OVERRIDES[addr]
+            if new is None:
+                continue
+            why += ' (stripes)'
         off = m.addr2off(addr)
+        cur = struct.unpack_from('>I', data, off)[0]
+        if cur != expect:
+            sys.exit('mismatch at %08x: %08x != expected %08x (%s)' % (addr, cur, expect, why))
         if isinstance(new, tuple) and new[0] == 'bl_cave':
             new = 0x48000001 | ((entries[new[1]] - addr) & 0x03fffffc)
         elif isinstance(new, tuple) and new[0] == 'cave_ptr':   # a pointer (vtable slot)
@@ -307,7 +349,7 @@ def apply_tiger(m, path_out, names, quiet):
             print('%-9s %08x file+%06x  %08x -> %08x  %s' % (name, addr, off, expect, new, why))
     # 'statusbar' and 'slimbar' have nothing to do in Tiger (no metal branch
     # in its eraser; with 'topbar' there is no bottom bar to slim)
-    todo = [n for n in names if n not in TIGER_SET_NAMES and n not in ('statusbar', 'slimbar')]
+    todo = [n for n in names if n not in TIGER_SET_NAMES + ['stripes'] and n not in ('statusbar', 'slimbar')]
     # (every set is ported now; this only reports a set name it doesn't know)
     if todo and not quiet:
         print('Tiger 10.4.11: not ported yet, skipped: %s' % ', '.join(todo))
@@ -456,19 +498,22 @@ def bl_target(data, m, a):
     return a + disp
 
 
-def place_divider_erase(m, data, sites, quiet):
+def place_divider_erase(m, data, sites, quiet, stripes=False):
     """Write cave.build_divider_erase() into EraseViewBackground's metal
     branch, which the 'statusbar' set makes unreachable (it starts right after
-    the branch we make unconditional and ends at the Aqua branch)."""
+    the branch we make unconditional and ends at the Aqua branch). With
+    'stripes' the divider is erased with the toolbar's pinstripes, its frame
+    only (the panes have no border columns then)."""
     import cave
     start, end = sites[0x23b0c] + 4, sites[0x23b90]
     ext = sites[FRAMEDBOX_SKIP] + FRAMEDBOX_STUB    # after place_divider's stub
     stubs = {nm: stub_addr(m, nm) for nm in cave.DIVIDER_STUBS}
-    code, back = cave.build_divider_erase(start, stubs, bl_target(data, m, sites[DIVIDER_FRAME_CALL]), ext)
+    brush = cave.TOOLBAR_BRUSH if stripes else cave.DIVIDER_BRUSH
+    code, back = cave.build_divider_erase(start, stubs, bl_target(data, m, sites[DIVIDER_FRAME_CALL]), ext, brush)
     assert len(code) <= end - start, 'divider erase too big for the dead branch'
     off = m.addr2off(start)
     data[off:off + len(code)] = code
-    tail = cave.build_divider_outset(ext, back, stubs)
+    tail = cave.build_divider_outset(ext, back, stubs, 0 if stripes else 1)
     assert ext + len(tail) <= sites[FRAMEDBOX_RESUME], 'divider outset too big for the framed-box section'
     data[m.addr2off(ext):m.addr2off(ext) + len(tail)] = tail
     if not quiet:
@@ -662,6 +707,150 @@ def write_topbar_fix(m, data, fix, quiet):
             print('topbar    %08x file+%06x  %08x -> %08x  %s' % (a, m.addr2off(a), cur, new, why))
 
 
+# --- 'stripes': a pinstriped sidebar (Panther 10.3.9; see cave.py).
+#  - The sidebar and its items fill their background with SidebarStripes
+#    (cave.build_sidebar_stripes): the view's draw, an item redrawn alone,
+#    and an item being dragged. The routine lives in the fake background
+#    control's draw (a metal leftover that draws nothing visible here).
+#  - The divider is 7 px (6 columns of stripes, erased with the toolbar
+#    brush, plus a 1 px line): its image (grip.py) is see-through with a
+#    soft shadow and the arrow, as wide as the frame, and centered on the
+#    divider's height (cave.build_centered_draw).
+#  - No margin around the panes: the splitter insets both panes by 1 px when
+#    its flag at +0xdc is set, which left a white row under the status bar's
+#    line and a white column at the window's left edge (nothing repainted
+#    it). Every reader of the flag reads it as 0; the top bar's bottom row
+#    (-1) and the content width (+1), which pushed the panes' borders out of
+#    the window, go back to 0; the divider is clipped to its full height.
+#  - Scrolling: TSidebarView's ScrollBits (vtable slot 0x198) refreshes the
+#    whole view instead of copying its pixels (the copied stripes moved with
+#    the items). The slot is an external pointer: its relocation moves to
+#    another slot bound to LView::ScrollBits, so neither dyld nor
+#    update_prebinding writes it back. Those two edits are outside __TEXT
+#    (stripes_outside_text gives them to mkinstaller.py).
+STRIPES_WIDTH = 7
+STRIPES_WIDTH_SITES = [0x4816c, 0x48198, 0x48388, 0x48a8c, 0x48ab0, 0x48c34, 0x48cdc, 0x4839c, 0x48c1c]
+STRIPES_OVERRIDES = {   # (set, 10.3.9 address) -> (word, comment)
+    ('slimbar', 0x48974): (0x7c840734, 'window layout: content width as is (stripes: no pane border to push out)'),
+    ('topbar', 0x48958): (0x38000000, 'window layout: bottom bar height 14 -> 0 (stripes: no pane border)'),
+    ('gap', 0x22534): (NOP, "grip draw: clip to the divider's full height (stripes)"),
+    ('gap', 0x22538): (NOP, "grip draw: clip to the divider's full height (stripes)"),
+}
+SIDEBAR_FILL = (0x164a8, 0x164d4)      # sub_16444, the sidebar view's background fill
+ITEM_FILL = (0x10064, 0x10090)         # sub_ffa4, an item redrawn alone (unless flags & 8)
+DRAG_FILL = (0x18f7c4, 0x18f7f4)       # sub_18f784, an item while one is dragged
+FAKEBG = (0x1af134, 0x1af218)          # TSidebarFakeBackgroundControl's draw (vtable slot 0x88)
+RET1 = 0x450b4                         # an existing `li r3,1 ; blr`
+MARGIN_FLAG_SITES = [0x48104, 0x48364, 0x48a3c, 0x48c14,   # li rX,1 after reading +0xdc -> li rX,0
+                     0x2b7c0]          # (sub_2b76c: the new sidebar width = divider left - 2 * margin)
+MARGIN_BRANCH = 0x485bc                # beq (no flag) -> b
+CENTER_DRAW = (0x22518, 0x22550)       # the divider draw's x centering ... the clip's lswi
+SCROLLBITS_SLOT, REFRESH_SLOT = 0x198, 0xcc
+SCROLLBITS_THUNK = 0x29fff0            # the last 16 bytes of __TEXT
+SIDEBAR_VIEW_CLASS = b'12TSidebarView'
+
+
+def stripes_patches(patches):
+    """PATCHES as 'stripes' changes them: the divider's width, and STRIPES_OVERRIDES."""
+    out = []
+    for name, addr, expect, action, why in patches:
+        if name == 'gap' and addr in STRIPES_WIDTH_SITES:
+            lo = action & 0xffff
+            assert lo in (13, 0x10000 - 13), hex(action)
+            action = (action & 0xffff0000) | ((STRIPES_WIDTH if lo == 13 else -STRIPES_WIDTH) & 0xffff)
+            why = why.replace('13', str(STRIPES_WIDTH)) + ' (stripes)'
+        elif (name, addr) in STRIPES_OVERRIDES:
+            action, why = STRIPES_OVERRIDES[(name, addr)]
+        out.append((name, addr, expect, action, why))
+    return out
+
+
+def scrollbits_relocation(m, data):
+    """(the sidebar view's ScrollBits slot, its external relocation's file
+    offset, another slot bound to LView::ScrollBits)."""
+    vt = vtables_of(m, SIDEBAR_VIEW_CLASS)
+    assert len(vt) == 1, 'TSidebarView vtable: %d found' % len(vt)
+    slot = vt[0] + SCROLLBITS_SLOT
+    extreloff, nextrel = m.dysymtab[14], m.dysymtab[15]
+    mine = other = None
+    for i in range(nextrel):
+        a, info = struct.unpack_from('>II', data, extreloff + 8 * i)
+        name = m.syms[info >> 8][0]
+        if a == slot:
+            assert name == '__ZN5LView10ScrollBitsEll', name
+            mine = extreloff + 8 * i
+        elif name == '__ZN5LView10ScrollBitsEll' and other is None:
+            other = a
+        if a == vt[0] + REFRESH_SLOT:
+            assert name == '__ZN5LView7RefreshEv', name
+    assert mine is not None and other is not None, 'ScrollBits relocation not found'
+    return slot, mine, other
+
+
+def stripes_outside_text(m):
+    """The two edits 'stripes' makes outside __TEXT, as (file offset, length):
+    the sidebar view's ScrollBits slot (__DATA) and its relocation's r_address.
+    Tiger's 'stripes' edits are all in __TEXT: none."""
+    if is_tiger(m):
+        return []
+    slot, rel, other = scrollbits_relocation(m, m.data)
+    return [(m.addr2off(slot), 4), (rel, 4)]
+
+
+def place_stripes(m, data, quiet):
+    import cave
+    w = lambda a: struct.unpack_from('>I', data, m.addr2off(a))[0]
+    put = lambda a, word: struct.pack_into('>I', data, m.addr2off(a), word)
+    def write(a, code):
+        data[m.addr2off(a):m.addr2off(a) + len(code)] = code
+    set_fill, fill_rect = stub_addr(m, '_CGContextSetRGBFillColor'), stub_addr(m, '_CGContextFillRect')
+    # the three white fills: SetRGBFillColor at +0x14 (+0x18), FillRect at +0x28 (+0x2c)
+    for (a, end), at in ((SIDEBAR_FILL, 0x14), (ITEM_FILL, 0x14), (DRAG_FILL, 0x18)):
+        assert bl_target(data, m, a + at) == set_fill and bl_target(data, m, a + at + 0x14) == fill_rect, \
+            'stripes: no sidebar fill at %x (10.3.9 only)' % a
+    assert w(SIDEBAR_FILL[0]) == 0x7f23cb78 and w(ITEM_FILL[0] - 0x14) == 0x389e0198 and w(DRAG_FILL[0] - 0x18) == 0x38830198
+    assert w(FAKEBG[0]) == 0x7c0802a6 and w(FAKEBG[1] - 4) == 0x4e800020 and w(FAKEBG[1] - 0x18) == 0x80010088
+    assert struct.unpack_from('>II', data, m.addr2off(RET1)) == (0x38600001, 0x4e800020)
+    stubs = {nm: stub_addr(m, nm) for nm in cave.SIDEBAR_STRIPES_STUBS}
+    table = struct.pack('>4f', *[g / 255 for g in cave.STRIPE_GRAYS]) + struct.pack('>f', 1.0)
+    # the view's fill, with the gray table after it (SidebarStripes' address is known first)
+    probe, where = cave.build_stripes_call(SIDEBAR_FILL[0], SIDEBAR_FILL[1], 25, 31, FAKEBG[0], copy_reg=27, table=table)
+    code, entry = cave.build_sidebar_stripes(FAKEBG[0], RET1, where, stubs)
+    assert len(code) <= FAKEBG[1] - FAKEBG[0], 'SidebarStripes does not fit the fake background draw'
+    write(FAKEBG[0], code + struct.pack('>I', NOP) * ((FAKEBG[1] - FAKEBG[0] - len(code)) // 4))
+    write(SIDEBAR_FILL[0], cave.build_stripes_call(SIDEBAR_FILL[0], SIDEBAR_FILL[1], 25, 31, entry, copy_reg=27, table=table)[0])
+    write(ITEM_FILL[0], cave.build_stripes_call(ITEM_FILL[0], ITEM_FILL[1], 27, 28, entry, copy_reg=29)[0])
+    write(DRAG_FILL[0], cave.build_stripes_call(DRAG_FILL[0], DRAG_FILL[1], 26, 30, entry, copy_reg=31,
+                                                setup=[cave.d_form(14, 31, 1, 0x50)])[0])   # addi r31,r1,0x50
+    # no pane margin
+    for a in MARGIN_FLAG_SITES:
+        assert w(a) >> 26 == 14 and (w(a) >> 16) & 31 == 0 and w(a) & 0xffff == 1, 'margin flag site %x' % a
+        assert any(w(a - 4 * k) >> 26 == 32 and w(a - 4 * k) & 0xffff == 0xdc for k in range(1, 12)), 'margin flag %x' % a
+        put(a, w(a) & 0xffff0000)
+    assert w(MARGIN_BRANCH) == 0x41be0108 and w(MARGIN_BRANCH - 8) & 0xffff == 0xdc
+    put(MARGIN_BRANCH, 0x48000108)
+    # the divider image centered on the divider's height
+    a, end = CENTER_DRAW
+    assert [w(a + 4 * k) for k in (0, 1, 2, 4, 6, 9)] == [0xed8a0032, 0xc1a10078, 0xed690032, 0x80610044, 0xc181007c, 0xc1610070]
+    assert w(end) == 0x7c9d84aa and w(end + 12) == 0x7c9d84aa, 'divider clip/draw rects'
+    assert w(0x22498) == 0xcbe2cab8 and w(0x22514) == 0xc121005c, 'f31 = 2^52, f9 = image height'
+    write(a, cave.build_centered_draw(a, end))
+    put(end, (31 << 26) | (4 << 21) | (28 << 16) | (16 << 11) | (597 << 1))   # lswi r4,r28,16: the clip's copy
+    # scrolling: ScrollBits -> Refresh
+    slot, rel, other = scrollbits_relocation(m, data)
+    o = m.addr2off(SCROLLBITS_THUNK)
+    assert not any(data[o:o + 16]), 'end of __TEXT in use'
+    write(SCROLLBITS_THUNK, cave.build_refresh_thunk(SCROLLBITS_THUNK, REFRESH_SLOT))
+    put(slot, SCROLLBITS_THUNK)
+    struct.pack_into('>I', data, rel, other)
+    if not quiet:
+        print('stripes   %08x file+%06x  %d bytes (SidebarStripes) in the fake background draw' % (
+            FAKEBG[0], m.addr2off(FAKEBG[0]), len(code)))
+        print('stripes   fills %s -> SidebarStripes; pane margin -> 0; divider image centered' % (
+            ', '.join('%x' % a for a, _ in (SIDEBAR_FILL, ITEM_FILL, DRAG_FILL))))
+        print('stripes   ScrollBits slot %x -> %x (Refresh), relocation moved to %x' % (slot, SCROLLBITS_THUNK, other))
+
+
 def apply(path_in, path_out, names=SET_NAMES, quiet=False):
     m = MachO(path_in)
     if is_tiger(m):
@@ -678,7 +867,7 @@ def apply(path_in, path_out, names=SET_NAMES, quiet=False):
     divider = None
     if 'gap' in names:
         assert 'statusbar' in names, "'gap' needs 'statusbar' (its helper lives in the dead metal branch)"
-        divider = place_divider_erase(m, data, sites, quiet)
+        divider = place_divider_erase(m, data, sites, quiet, stripes='stripes' in names)
         free = place_divider(m, data, sites, quiet, cg_entry=fix[1]['port'] if fix else None)
     if 'barupdate' in names:
         assert 'gap' in names, "'barupdate' needs 'gap' (it lives after the splitter bar draw)"
@@ -686,7 +875,11 @@ def apply(path_in, path_out, names=SET_NAMES, quiet=False):
         place_barupdate(m, data, sites, free, cv['free'], quiet)
     if 'toolbar' in names:
         place_view_loader(m, data, sites, quiet)
-    for p in PATCHES:
+    stripes = 'stripes' in names
+    if stripes:
+        assert all(n in names for n in ('gap', 'topbar', 'slimbar', 'statusbar')), "'stripes' needs 'gap' and 'topbar'"
+        assert all(sites[a] == a for a in STRIPES_WIDTH_SITES), "'stripes' is for Finder 10.3.9 only"
+    for p in (stripes_patches(PATCHES) if stripes else PATCHES):
         name, refaddr, expect, action, why = p
         if name not in names:
             continue
@@ -729,6 +922,8 @@ def apply(path_in, path_out, names=SET_NAMES, quiet=False):
             print('%-9s %08x file+%06x  %08x -> %08x  %s' % (name, addr, off, cur, new, why))
     if fix:
         write_topbar_fix(m, data, fix, quiet)
+    if stripes:
+        place_stripes(m, data, quiet)
     open(path_out, 'wb').write(bytes(data))
     return sites
 

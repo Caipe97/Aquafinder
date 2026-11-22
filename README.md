@@ -16,6 +16,15 @@ Make Mac OS X 10.3.9 Panther and 10.4.11 Tiger look and fit better on small scre
   gradient with its grip near the bottom, and no other lines around the panes. Collapse the
   sidebar and the divider stays at the window's left edge, so you can drag it back out.
 - The sidebar divider redraws cleanly when you drag it or resize the window.
+- Optional: a **pinstriped sidebar**. The sidebar gets the window's pinstripes, in
+  step with the item count bar above it, and a slim 7 px divider: the same stripes with a soft
+  shadow falling from a 1 px line by the files, and a small arrow at its middle that stays clear
+  of the window's edge when the sidebar is collapsed. The sidebar and the file list start right
+  under the item count bar's line, as in Jaguar. The stripes stay put when the sidebar scrolls,
+  and behind items you select or drag. Tick it in the Aquafinder app, or run
+  `sudo sh aquafinder.sh install stripes` (`restore stripes` brings back the plain sidebar).
+
+  ![Pinstriped sidebar](screens/stripes.png)
 - In search results, the splitter above the path pane is Panther's Aqua splitter bar: a light
   gray bar with a three-line grip in its middle, instead of the metal one. (Panther)
 - In Tiger's search window, the bar with Servers, Computer, Home and Others has the same
@@ -58,6 +67,8 @@ Dock tile are the same files as Panther's.
 | ![Tiger Finder window](screens/tiger-finder-list.png) | ![Tiger search window](screens/tiger-search.png) |
 | A Finder window on Tiger | Tiger's search window |
 
+![Pinstriped sidebar on Tiger](screens/tiger-stripes.png)
+
 ## Install
 
 The easy way, on Panther or Tiger:
@@ -87,6 +98,8 @@ To **update** to a newer version, run the same `install` command with the new sc
 It upgrades files patched by an older version, starting from the saved originals.
 
 You can also install just one part: `install finder`, `install titlebars` or `install logo`.
+`install stripes` adds the pinstriped sidebar to the Finder part (`install finder` keeps
+whichever sidebar is installed).
 Check what's installed with `sh aquafinder.sh status`.
 
 ## Undo
@@ -144,7 +157,8 @@ and fetches `dist/Aquafinder.dmg`. The same app and package run on Tiger. If sud
 command to run in Terminal on the Mac; then fetch the result with `FETCH_ONLY=1 tools/mknative.sh 1.0`. Both the app and the package run `aquafinder.sh` to do the work,
 so they make the same checks.
 
-Tiger's Finder changes are in `TIGER_PATCHES` in `tools/patch.py`, at 10.4.11's own addresses
+Tiger's Finder changes are in `TIGER_PATCHES` (and `TIGER_STRIPES_PATCHES` for the pinstriped
+sidebar) in `tools/patch.py`, at 10.4.11's own addresses
 (its code is too different for the signature matching used for Panther builds), with the new
 drawing code in `tools/cave.py`. `tools/vm-push.sh` takes `VMHOST=tiger-root` to swap a file into
 a running Tiger VM.
