@@ -1,4 +1,4 @@
-# Aquafinder
+# <img src="screens/app-icon.png" width="64" align="center"> Aquafinder
 
 Make Mac OS X 10.3.9 Panther and 10.4.11 Tiger look and fit better on small screens, like 800×600 G3 iBooks.
 
@@ -81,6 +81,7 @@ The easy way, on Panther or Tiger:
 
 This patches all three parts and puts the **Aquafinder** app in your Applications folder.
 Open the app any time to turn any part off or back on.
+Click an option to see a before and after picture of it; the "after" follows what you tick.
 Untick a part and click Apply to put Apple's original files back.
 
 ![Aquafinder app](screens/app.png)
@@ -154,6 +155,10 @@ since nothing current can compile PowerPC Cocoa code. Rebuild the script first, 
 tools/mknative.sh 1.0
 ```
 
+The app's icon (`gui/Aquafinder.icns`) is drawn by `tools/appicon.py`, and its before/after
+pictures (`gui/preview/`) are cut from `screens/` by `tools/previews.py`; rerun those after
+changing them.
+
 It copies `gui/`, `pkg/` and the script over SSH, builds there with `tools/native-build.sh`,
 and fetches `dist/Aquafinder.dmg`. The same app and package run on Tiger. If sudo there needs a password, the build stops and prints the
 command to run in Terminal on the Mac; then fetch the result with `FETCH_ONLY=1 tools/mknative.sh 1.0`. Both the app and the package run `aquafinder.sh` to do the work,
@@ -162,5 +167,15 @@ so they make the same checks.
 Tiger's Finder changes are in `TIGER_PATCHES` (and `TIGER_STRIPES_PATCHES` for the pinstriped
 sidebar) in `tools/patch.py`, at 10.4.11's own addresses
 (its code is too different for the signature matching used for Panther builds), with the new
-drawing code in `tools/cave.py`. `tools/vm-push.sh` takes `VMHOST=tiger-root` to swap a file into
+drawing code in `tools/cave.py`. Tiger's Back/Forward and View controls are theme-drawn
+segmented views, so its 'toolbar' set gives each one a small Carbon event handler
+(`cave.build_tiger_toolbar`) that draws Jaguar's images and hit-tests by their slots.
+`tools/vm-push.sh` takes `VMHOST=tiger-root` to swap a file into
 a running Tiger VM.
+
+## About
+
+Made by [Caipe97](https://github.com/Caipe97). Source, updates and bug reports:
+[github.com/Caipe97/Aquafinder](https://github.com/Caipe97/Aquafinder). MIT License.
+
+![About Aquafinder](screens/app-about.png)

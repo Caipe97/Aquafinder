@@ -24,19 +24,26 @@ typedef struct {
     const char *title, *desc;
     BOOL restart;              /* needs a restart to show everywhere */
     int parent;                /* option of PARTS[parent], or -1 */
+    /* Preview pictures (Resources/<name>.png, made by tools/previews.py):
+     * without the part, with it, and with it plus its ticked option. */
+    const char *before, *after, *afterOption;
 } Part;
 
 /* An option row comes right after its parent, so Apply runs the parent's
  * install/restore first. */
 static const Part PARTS[] = {
     { "finder", "finder grip", "Aqua Finder windows",
-      "Plain Aqua instead of brushed metal, the item count under the toolbar as in Jaguar, and a sidebar divider like the column view's.", NO, -1 },
+      "Swaps the brushed metal for plain Aqua, with the item count up top like in Jaguar.", NO, -1,
+      "finder-metal", "finder-aqua", "finder-stripes" },
     { "stripes", "stripes", "Pinstriped sidebar",
-      "Pinstripes behind the sidebar, and a slim divider with a soft shadow and a small arrow.", NO, 0 },
+      "Adds pinstripes to the sidebar and a slimmer divider.", NO, 0,
+      "sidebar-plain", "sidebar-stripes", NULL },
     { "titlebars", "titlebars appkit", "Jaguar title bars",
-      "Pinstriped title bars from 10.2 in every app, see-through when inactive, and a smaller loading spinner. Needs a restart.", YES, -1 },
+      "Jaguar's pinstriped title bars in every app, see-through in the background. Takes a restart.", YES, -1,
+      "titlebar-panther", "titlebar-jaguar", NULL },
     { "logo", "logo", "Jaguar logo and Finder icon",
-      "The Garamond \"Mac OS X\" in About This Mac and the login panel, and Jaguar's Finder icon in the Finder and the Dock.", NO, -1 },
+      "The classic Garamond \"Mac OS X\" at login and in About This Mac, plus Jaguar's Finder icon.", NO, -1,
+      "logo-panther", "logo-jaguar", NULL },
 };
 #define NPARTS ((int)(sizeof PARTS / sizeof PARTS[0]))
 #define S(c) [NSString stringWithCString:(c)]
@@ -60,16 +67,79 @@ static int combine(int acc, int st, BOOL first)
     return ST_MIXED;
 }
 
+#define GITHUB "https://github.com/Caipe97/Aquafinder"
+
+/* One option's row. A click anywhere but the checkbox picks the row for the
+ * preview; it's drawn highlighted while picked. */
+@interface RowView : NSView
+{
+    id target;
+    int index;
+    BOOL picked;
+    NSView *check;
+}
+- (void)setTarget:(id)t index:(int)i check:(NSView *)c;
+- (int)index;
+- (void)setPicked:(BOOL)p;
+@end
+
+@implementation RowView
+- (void)setTarget:(id)t index:(int)i check:(NSView *)c { target = t; index = i; check = c; }
+- (int)index { return index; }
+- (void)setPicked:(BOOL)p { if (p != picked) { picked = p; [self setNeedsDisplay:YES]; } }
+- (BOOL)acceptsFirstMouse:(NSEvent *)e { return YES; }
+
+- (NSView *)hitTest:(NSPoint)p
+{
+    NSView *v = [super hitTest:p];
+    if (v == nil || v == check || [v isDescendantOf:check]) return v;
+    return self;   /* the labels don't take clicks */
+}
+
+- (void)mouseDown:(NSEvent *)e
+{
+    [target performSelector:@selector(pickRow:) withObject:self];
+}
+
+- (void)drawRect:(NSRect)r
+{
+    NSRect b = NSInsetRect([self bounds], 1.5, 1.5);
+    float rad = 6;
+    NSBezierPath *p;
+    if (!picked) return;
+    /* a rounded rectangle (bezierPathWithRoundedRect is 10.5+) */
+    p = [NSBezierPath bezierPath];
+    [p moveToPoint:NSMakePoint(NSMidX(b), NSMaxY(b))];
+    [p appendBezierPathWithArcFromPoint:NSMakePoint(NSMaxX(b), NSMaxY(b)) toPoint:NSMakePoint(NSMaxX(b), NSMidY(b)) radius:rad];
+    [p appendBezierPathWithArcFromPoint:NSMakePoint(NSMaxX(b), NSMinY(b)) toPoint:NSMakePoint(NSMidX(b), NSMinY(b)) radius:rad];
+    [p appendBezierPathWithArcFromPoint:NSMakePoint(NSMinX(b), NSMinY(b)) toPoint:NSMakePoint(NSMinX(b), NSMidY(b)) radius:rad];
+    [p appendBezierPathWithArcFromPoint:NSMakePoint(NSMinX(b), NSMaxY(b)) toPoint:NSMakePoint(NSMidX(b), NSMaxY(b)) radius:rad];
+    [p closePath];
+    [[NSColor colorWithCalibratedRed:0.22 green:0.46 blue:0.86 alpha:0.10] set];
+    [p fill];
+    [[NSColor colorWithCalibratedRed:0.22 green:0.46 blue:0.86 alpha:0.45] set];
+    [p setLineWidth:1];
+    [p stroke];
+}
+@end
+
 @interface Controller : NSObject
 {
     NSWindow *window;
     NSButton *box[NPARTS], *applyButton;
-    NSTextField *status[NPARTS], *footer;
+    NSTextField *status[NPARTS], *footer, *beforeLabel, *afterLabel;
+    RowView *row[NPARTS];
+    NSImageView *beforeView, *afterView;
+    NSMutableDictionary *images;
     NSProgressIndicator *spinner;
-    int state[NPARTS];
+    int state[NPARTS], picked;
     AuthorizationRef auth;
 }
 - (void)changed:(id)sender;
+- (void)showPreview;
+- (void)pickRow:(RowView *)r;
+- (void)openGitHub:(id)sender;
+- (NSTextView *)textViewIn:(NSView *)v;
 @end
 
 @implementation Controller
@@ -79,56 +149,102 @@ static int combine(int acc, int st, BOOL first)
     return [[NSBundle mainBundle] pathForResource:@"aquafinder" ofType:@"sh"];
 }
 
-- (NSTextField *)label:(NSString *)s frame:(NSRect)r gray:(BOOL)gray
+- (NSTextField *)label:(NSString *)s frame:(NSRect)r gray:(BOOL)gray in:(NSView *)v
 {
     NSTextField *t = [[[NSTextField alloc] initWithFrame:r] autorelease];
     [t setStringValue:s];
     [t setEditable:NO]; [t setSelectable:NO]; [t setBezeled:NO]; [t setDrawsBackground:NO];
     [t setFont:[NSFont systemFontOfSize:11]];
     if (gray) [t setTextColor:[NSColor disabledControlTextColor]];
-    [[window contentView] addSubview:t];
+    [v addSubview:t];
     return t;
 }
 
+- (NSTextField *)label:(NSString *)s frame:(NSRect)r gray:(BOOL)gray
+{
+    return [self label:s frame:r gray:gray in:[window contentView]];
+}
+
+- (NSImage *)image:(const char *)name
+{
+    NSImage *im;
+    NSString *path;
+    if (name == NULL) return nil;
+    if (images == nil) images = [[NSMutableDictionary alloc] init];
+    if ((im = [images objectForKey:S(name)]) != nil) return im;
+    path = [[NSBundle mainBundle] pathForResource:S(name) ofType:@"png"];
+    im = path ? [[[NSImage alloc] initWithContentsOfFile:path] autorelease] : nil;
+    if (im) [images setObject:im forKey:S(name)];
+    return im;
+}
+
+/* The window: options on the left, each in a row you can click to preview
+ * it; the before/after pictures on the right; Apply along the bottom. It
+ * fits an 800x600 screen. */
+#define ROW_H   88      /* one option's row */
+#define PV_X    446     /* preview column */
+#define PV_W    286     /* a 280x170 picture in a gray bezel */
+#define PV_H    176
+
 - (void)buildWindow
 {
-    float rowH = 86, h = 130 + NPARTS * rowH, y;
+    float h = 130 + NPARTS * ROW_H, w = PV_X + PV_W + 18, top = h - 64;
     int i;
-    window = [[NSWindow alloc] initWithContentRect:NSMakeRect(0, 0, 440, h)
+    window = [[NSWindow alloc] initWithContentRect:NSMakeRect(0, 0, w, h)
         styleMask:(NSTitledWindowMask | NSClosableWindowMask | NSMiniaturizableWindowMask)
         backing:NSBackingStoreBuffered defer:NO];
     [window setTitle:@"Aquafinder"];
 
-    [self label:@"Make Panther and Tiger look and fit better on small screens. Changes ask for an administrator password."
-          frame:NSMakeRect(20, h - 52, 400, 34) gray:NO];
+    [self label:@"Give Panther and Tiger a cleaner look that fits small screens. Click an option to preview it. Applying asks for an admin password."
+          frame:NSMakeRect(20, h - 52, 410, 42) gray:NO];
 
-    y = h - 84;
-    for (i = 0; i < NPARTS; i++, y -= rowH) {
-        float x = PARTS[i].parent < 0 ? 18 : 38;   /* options sit under their part */
-        NSButton *b = [[[NSButton alloc] initWithFrame:NSMakeRect(x, y, 418 - x, 20)] autorelease];
+    for (i = 0; i < NPARTS; i++) {
+        float x = PARTS[i].parent < 0 ? 8 : 28, rh = ROW_H - 6;   /* options sit under their part */
+        RowView *r = [[[RowView alloc] initWithFrame:NSMakeRect(10, top - i * ROW_H - rh, 420, rh)] autorelease];
+        NSButton *b = [[[NSButton alloc] initWithFrame:NSMakeRect(x, rh - 24, 408 - x, 20)] autorelease];
         [b setButtonType:NSSwitchButton];
         [b setTitle:S(PARTS[i].title)];
         [b setFont:PARTS[i].parent < 0 ? [NSFont boldSystemFontOfSize:13] : [NSFont systemFontOfSize:13]];
         [b setTarget:self]; [b setAction:@selector(changed:)];
-        [[window contentView] addSubview:b];
-        box[i] = b;
-        [self label:S(PARTS[i].desc) frame:NSMakeRect(x + 20, y - 34, 400 - x, 30) gray:NO];
-        status[i] = [self label:@"" frame:NSMakeRect(x + 20, y - 52, 400 - x, 16) gray:YES];
+        [r addSubview:b];
+        [r setTarget:self index:i check:b];
+        [[window contentView] addSubview:r];
+        box[i] = b; row[i] = r;
+        {   /* the status line goes right under the description, one line or two */
+            NSTextField *d = [self label:S(PARTS[i].desc) frame:NSMakeRect(x + 20, rh - 58, 390 - x, 30) gray:NO in:r];
+            float dh = [[d cell] cellSizeForBounds:NSMakeRect(0, 0, 390 - x, 1000)].height;
+            [d setFrame:NSMakeRect(x + 20, rh - 28 - dh, 390 - x, dh)];
+            status[i] = [self label:@"" frame:NSMakeRect(x + 20, rh - 46 - dh, 390 - x, 16) gray:YES in:r];
+        }
     }
 
-    NSBox *line = [[[NSBox alloc] initWithFrame:NSMakeRect(20, 62, 400, 1)] autorelease];
+    beforeLabel = [self label:@"Before" frame:NSMakeRect(PV_X + 2, h - 32, PV_W, 16) gray:NO];
+    beforeView = [[[NSImageView alloc] initWithFrame:NSMakeRect(PV_X, h - 36 - PV_H, PV_W, PV_H)] autorelease];
+    afterLabel = [self label:@"After" frame:NSMakeRect(PV_X + 2, h - 58 - PV_H, PV_W, 16) gray:NO];
+    afterView = [[[NSImageView alloc] initWithFrame:NSMakeRect(PV_X, h - 62 - 2 * PV_H, PV_W, PV_H)] autorelease];
+    [beforeLabel setFont:[NSFont boldSystemFontOfSize:11]];
+    [afterLabel setFont:[NSFont boldSystemFontOfSize:11]];
+    for (i = 0; i < 2; i++) {
+        NSImageView *v = i ? afterView : beforeView;
+        [v setImageFrameStyle:NSImageFrameGrayBezel];
+        [v setImageScaling:NSScaleNone];
+        [v setEditable:NO];
+        [[window contentView] addSubview:v];
+    }
+
+    NSBox *line = [[[NSBox alloc] initWithFrame:NSMakeRect(20, 62, w - 40, 1)] autorelease];
     [line setBoxType:NSBoxSeparator];
     [[window contentView] addSubview:line];
 
-    footer = [self label:@"" frame:NSMakeRect(20, 18, 250, 30) gray:YES];
-    spinner = [[[NSProgressIndicator alloc] initWithFrame:NSMakeRect(276, 24, 16, 16)] autorelease];
+    footer = [self label:@"" frame:NSMakeRect(20, 18, w - 196, 30) gray:YES];
+    spinner = [[[NSProgressIndicator alloc] initWithFrame:NSMakeRect(w - 164, 24, 16, 16)] autorelease];
     [spinner setStyle:NSProgressIndicatorSpinningStyle];
     [spinner setControlSize:NSSmallControlSize];
     [spinner setDisplayedWhenStopped:NO];
     [spinner setUsesThreadedAnimation:YES];
     [[window contentView] addSubview:spinner];
 
-    applyButton = [[[NSButton alloc] initWithFrame:NSMakeRect(300, 14, 126, 32)] autorelease];
+    applyButton = [[[NSButton alloc] initWithFrame:NSMakeRect(w - 140, 14, 126, 32)] autorelease];
     [applyButton setBezelStyle:NSRoundedBezelStyle];
     [applyButton setTitle:@"Apply"];
     [applyButton setKeyEquivalent:@"\r"];
@@ -171,12 +287,12 @@ static int combine(int acc, int st, BOOL first)
 - (NSString *)describe:(int)st
 {
     switch (st) {
-    case ST_ORIGINAL:  return @"Currently: not installed (Apple's original).";
-    case ST_INSTALLED: return @"Currently: installed.";
-    case ST_OLD:       return @"Currently: an older version is installed. Apply to update it.";
-    case ST_MIXED:     return @"Currently: partly installed. Apply to finish.";
+    case ST_ORIGINAL:  return @"Now: not installed.";
+    case ST_INSTALLED: return @"Now: installed.";
+    case ST_OLD:       return @"Now: an older version. Apply to update it.";
+    case ST_MIXED:     return @"Now: partly installed. Apply to finish.";
     }
-    return @"Not available: a system file isn't one Aquafinder knows, so it is left alone.";
+    return @"Not available: a system file here isn't one Aquafinder knows.";
 }
 
 - (void)refresh
@@ -189,7 +305,7 @@ static int combine(int acc, int st, BOOL first)
         [box[i] setState:(st == ST_INSTALLED || st == ST_OLD || st == ST_MIXED) ? NSOnState : NSOffState];
         [status[i] setStringValue:[self describe:st]];
         if (PARTS[i].parent >= 0 && st != ST_UNKNOWN)   /* an option: on or off, not "installed" */
-            [status[i] setStringValue:st == ST_INSTALLED ? @"Currently: on." : @"Currently: off."];
+            [status[i] setStringValue:st == ST_INSTALLED ? @"Now: on." : @"Now: off."];
     }
     [self changed:nil];
 }
@@ -214,9 +330,36 @@ static int combine(int acc, int st, BOOL first)
         if (sender == box[i] && [box[i] state] == NSOnState && [box[p] isEnabled]) [box[p] setState:NSOnState];
         if ([box[p] state] == NSOffState) [box[i] setState:NSOffState];
     }
-    for (i = 0; i < NPARTS; i++) if ([self verbFor:i]) any = YES;
+    for (i = 0; i < NPARTS; i++) {
+        if ([self verbFor:i]) any = YES;
+        if (sender == box[i]) picked = i;   /* ticking an option previews it */
+    }
     [applyButton setEnabled:any];
     if (sender != nil) [footer setStringValue:any ? @"" : @"Nothing to change."];
+    [self showPreview];
+}
+
+/* Before: the picked part left out. After: what Apply leaves, so it follows
+ * the ticks (and the Finder's picture picks up the pinstriped sidebar). */
+- (void)showPreview
+{
+    const Part *p = &PARTS[picked];
+    BOOL on = [box[picked] state] == NSOnState, opt = NO;
+    int i;
+    for (i = 0; i < NPARTS; i++) {
+        [row[i] setPicked:(i == picked)];
+        if (PARTS[i].parent == picked && [box[i] state] == NSOnState) opt = YES;
+    }
+    [beforeView setImage:[self image:p->before]];
+    [afterView setImage:[self image:!on ? p->before : (opt && p->afterOption) ? p->afterOption : p->after]];
+    [afterLabel setStringValue:!on ? @"After: the stock look (unticked)"
+                             : (opt && p->afterOption) ? @"After, with the pinstriped sidebar" : @"After"];
+}
+
+- (void)pickRow:(RowView *)r
+{
+    picked = [r index];
+    [self showPreview];
 }
 
 - (BOOL)authorize
@@ -294,7 +437,7 @@ static int combine(int acc, int st, BOOL first)
         NSRunAlertPanel(@"Some changes weren't made", @"%@", @"OK", nil, nil, log);
     } else if (restart) {
         int r = NSRunAlertPanel(@"Restart to finish",
-            @"The title bars change in every app after a restart. Everything else has already been updated.",
+            @"The new title bars show up everywhere after a restart. Everything else is already done.",
             @"Restart", @"Later", nil);
         if (r == NSAlertDefaultReturn) [self restartMac];
     } else {
@@ -312,6 +455,66 @@ static int combine(int acc, int st, BOOL first)
     [window makeKeyAndOrderFront:nil];
 }
 
+/* The standard About panel, with the author and the project's page as
+ * credits (the copyright line comes from Info.plist). */
+- (void)about:(id)sender
+{
+    NSMutableParagraphStyle *ps = [[[NSMutableParagraphStyle alloc] init] autorelease];
+    NSMutableAttributedString *c = [[[NSMutableAttributedString alloc] init] autorelease];
+    NSDictionary *plain, *bold, *link;
+    [ps setAlignment:NSCenterTextAlignment];
+    plain = [NSDictionary dictionaryWithObjectsAndKeys:[NSFont systemFontOfSize:11], NSFontAttributeName,
+             ps, NSParagraphStyleAttributeName, nil];
+    bold = [NSDictionary dictionaryWithObjectsAndKeys:[NSFont boldSystemFontOfSize:11], NSFontAttributeName,
+            ps, NSParagraphStyleAttributeName, nil];
+    link = [NSDictionary dictionaryWithObjectsAndKeys:[NSFont systemFontOfSize:11], NSFontAttributeName,
+            ps, NSParagraphStyleAttributeName, [NSURL URLWithString:@GITHUB], NSLinkAttributeName,
+            [NSColor blueColor], NSForegroundColorAttributeName,
+            [NSNumber numberWithInt:NSSingleUnderlineStyle], NSUnderlineStyleAttributeName, nil];
+#define ADD(s, a) [c appendAttributedString:[[[NSAttributedString alloc] initWithString:(s) attributes:(a)] autorelease]]
+    ADD(@"Made by ", plain); ADD(@"Caipe97", bold);
+    ADD(@"\n\nSource code, updates and bug reports:\n", plain);
+    ADD(@"github.com/Caipe97/Aquafinder", link);
+#undef ADD
+    /* "Version 1.5" alone: by default the panel also adds CFBundleVersion, "1.5 (v1.5)" */
+    [NSApp orderFrontStandardAboutPanelWithOptions:[NSDictionary dictionaryWithObjectsAndKeys:c, @"Credits",
+        [@"Version " stringByAppendingString:[[NSBundle mainBundle] objectForInfoDictionaryKey:@"CFBundleShortVersionString"]],
+        @"ApplicationVersion", @"", @"Version", nil]];
+    /* Panther's About panel shows the link but doesn't follow it on its own */
+    {
+        NSArray *ws = [NSApp windows];
+        unsigned k;
+        for (k = 0; k < [ws count]; k++) {
+            NSWindow *aw = [ws objectAtIndex:k];
+            NSTextView *tv = aw == window ? nil : [self textViewIn:[aw contentView]];
+            if (tv) [tv setDelegate:self];
+        }
+    }
+}
+
+- (NSTextView *)textViewIn:(NSView *)v
+{
+    NSArray *sub = [v subviews];
+    unsigned k;
+    if ([v isKindOfClass:[NSTextView class]]) return (NSTextView *)v;
+    for (k = 0; k < [sub count]; k++) {
+        NSTextView *t = [self textViewIn:[sub objectAtIndex:k]];
+        if (t) return t;
+    }
+    return nil;
+}
+
+- (BOOL)textView:(NSTextView *)tv clickedOnLink:(id)link atIndex:(unsigned)i
+{
+    [self openGitHub:nil];
+    return YES;
+}
+
+- (void)openGitHub:(id)sender
+{
+    [[NSWorkspace sharedWorkspace] openURL:[NSURL URLWithString:@GITHUB]];
+}
+
 - (BOOL)applicationShouldTerminateAfterLastWindowClosed:(NSApplication *)a { return YES; }
 
 - (void)applicationWillTerminate:(NSNotification *)n
@@ -321,14 +524,15 @@ static int combine(int acc, int st, BOOL first)
 
 @end
 
-static void buildMenus(void)
+static void buildMenus(id controller)
 {
     NSMenu *bar = [[[NSMenu alloc] initWithTitle:@""] autorelease];
     NSMenu *app = [[[NSMenu alloc] initWithTitle:@"Aquafinder"] autorelease];
     NSMenu *win = [[[NSMenu alloc] initWithTitle:@"Window"] autorelease];
     id it;   /* 10.3 returns id <NSMenuItem> */
 
-    [app addItemWithTitle:@"About Aquafinder" action:@selector(orderFrontStandardAboutPanel:) keyEquivalent:@""];
+    [[app addItemWithTitle:@"About Aquafinder" action:@selector(about:) keyEquivalent:@""] setTarget:controller];
+    [[app addItemWithTitle:@"Aquafinder on GitHub" action:@selector(openGitHub:) keyEquivalent:@""] setTarget:controller];
     [app addItem:[NSMenuItem separatorItem]];
     [app addItemWithTitle:@"Hide Aquafinder" action:@selector(hide:) keyEquivalent:@"h"];
     [app addItem:[NSMenuItem separatorItem]];
@@ -349,9 +553,11 @@ static void buildMenus(void)
 int main(int argc, const char *argv[])
 {
     NSAutoreleasePool *pool = [[NSAutoreleasePool alloc] init];
+    Controller *c;
     [NSApplication sharedApplication];
-    buildMenus();
-    [NSApp setDelegate:[[Controller alloc] init]];
+    c = [[Controller alloc] init];
+    buildMenus(c);
+    [NSApp setDelegate:c];
     [NSApp run];
     [pool release];
     return 0;

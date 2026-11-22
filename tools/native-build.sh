@@ -26,6 +26,7 @@ sub gui/Info.plist "$APP/Info.plist"
 printf 'APPL????' > "$APP/PkgInfo"
 cp aquafinder.sh "$APP/Resources/"
 [ -f gui/Aquafinder.icns ] && cp gui/Aquafinder.icns "$APP/Resources/" || true
+cp gui/preview/*.png "$APP/Resources/"     # before/after pictures (tools/previews.py)
 
 SUDO true || { echo "native-build: app built in build/Aquafinder.app; the package needs root."
                echo "native-build: run it in Terminal on the Mac so sudo can ask for the password."; exit 2; }
