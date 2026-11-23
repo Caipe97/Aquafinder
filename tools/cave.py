@@ -2005,7 +2005,7 @@ TIGER_TOOLBAR_STUBS = ['_GetControlEventTarget', '_InstallEventHandler', '_HISeg
                        '_HISegmentedViewGetSegmentCommand',
                        '_GetResource', '_GetHandleSize', '_CGDataProviderCreateWithData',
                        '_CGImageCreateWithPNGDataProvider', '_CGDataProviderRelease', '_HIViewDrawCGImage',
-                       '_CGImageRelease']
+                       '_CGImageRelease', '_HISegmentedViewSetSegmentEnabled', '_HIViewSetNeedsDisplay']
 # per segment count (2, 3): first id, ids per segment, slot width, state table
 TIGER_SEGMENTS = [
     (8910, 4, 28.0, (2, 2, 1, 3, 0, 0, 0)),     # Back, Forward: normal, pressed, disabled, pressed (Graphite)
@@ -2036,7 +2036,13 @@ def build_tiger_toolbar(cave, stubs, graphite=TIGER_GRAPHITE, segments=TIGER_SEG
         HISegmentedViewSetSegmentCount: installs the handler on the view
         (userData = the view), then counts its segments
       handler(callRef r3, event r4, view r5): the Carbon event handler
-    Returns (bytes, {'segviews': addr})."""
+      segenable(view r3, segment r4, enabled r5): stands in for sub_3a198's
+        tail call to HISegmentedViewSetSegmentEnabled, then marks the whole
+        view for redrawing. HIToolbox invalidates only its own segment's
+        rect, inset and narrower than our images, so the rest of a button
+        kept its old state (Forward's arrow head stayed black after Back and
+        a new folder turned it off).
+    Returns (bytes, {'segviews': addr, 'segenable': addr})."""
     REC = 20                                   # record: u16 first id, u16 ids per segment, u16 count, pad, f32 slot, 7 states, pad
     consts = struct.pack('>4I', _ostype('cntl'), 4, _ostype('cntl'), 3)      # 0  SPECS
     consts += struct.pack('>2f', 0.0, TIGER_BUTTON_HEIGHT)                   # 16 ZERO HEIGHT
@@ -2073,6 +2079,23 @@ def build_tiger_toolbar(cave, stubs, graphite=TIGER_GRAPHITE, segments=TIGER_SEG
     a.mtlr(0)
     _lmw(a, 30, -8, 1)
     a.b(stubs['_HISegmentedViewSetSegmentCount'])
+
+    # segenable(view, segment, enabled)
+    a.label('segenable')
+    a.mflr(0)
+    a.stw(31, -4, 1)
+    a.stw(0, 8, 1)
+    a.stwu(1, -0x50, 1)
+    a.mr(31, 3)
+    a.bl(stubs['_HISegmentedViewSetSegmentEnabled'])
+    a.mr(3, 31)
+    a.li(4, 1)
+    a.bl(stubs['_HIViewSetNeedsDisplay'])
+    a.lwz(0, 0x58, 1)
+    a.addi(1, 1, 0x50)
+    a.mtlr(0)
+    a.lwz(31, -4, 1)
+    a.blr()
 
     # handler(callRef, event, view); frame 0xa0: 0x40 bounds, 0x50 image rect,
     # 0x60 ctx (draw) or point (hit test), 0x68 selected (draw) / part,
@@ -2270,4 +2293,4 @@ def build_tiger_toolbar(cave, stubs, graphite=TIGER_GRAPHITE, segments=TIGER_SEG
     a.words[fix_handler] = d_form(15, 4, 0, (h + 0x8000) >> 16)
     a.words[fix_handler + 1] = d_form(14, 4, 4, h & 0xffff)
     code = a.assemble()
-    return code, {'segviews': a.labels['segviews']}
+    return code, {'segviews': a.labels['segviews'], 'segenable': a.labels['segenable']}

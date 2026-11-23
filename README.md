@@ -197,9 +197,13 @@ and `TIGER_WELL_PATCHES` for the sidebar styles) in `tools/patch.py`, at 10.4.11
 (its code is too different for the signature matching used for Panther builds), with the new
 drawing code in `tools/cave.py`. Tiger's Back/Forward and View controls are theme-drawn
 segmented views, so its 'toolbar' set gives each one a small Carbon event handler
-(`cave.build_tiger_toolbar`) that draws Jaguar's images and hit-tests by their slots.
+(`cave.build_tiger_toolbar`) that draws Jaguar's images and hit-tests by their slots. When a
+segment turns on or off, the whole control is redrawn: HIToolbox would only redraw its own,
+smaller segment rect.
 `tools/vm-push.sh` takes `VMHOST=tiger-root` to swap a file into
 a running Tiger VM.
+
+To publish a new version, follow [`RELEASING.md`](RELEASING.md).
 
 ## About
 
