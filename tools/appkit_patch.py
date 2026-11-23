@@ -9,8 +9,13 @@ CGSNewWindow and only then made it non-opaque. We do the same:
 
   1. -[NSWindow _commonAwake] always takes its plain _NSCreateWindow path
      (CGSNewWindow, backing store with alpha) instead of the opaque-shape one.
-  2. The window is then sent [self setOpaque:NO] (window flag + server
-     opacity), where Panther only did that for windows that weren't opaque.
+  2. An opaque window is then sent [self setOpaque:NO] (window flag +
+     server opacity), in the opaque-shape path's code, now unused. A window
+     that's already non-opaque keeps Panther's own _NSSetWindowOpacity(NO):
+     setOpaque:NO returns early when the flag is already NO, so it never told
+     the window server, and a plain CGSNewWindow is opaque there. Such
+     windows (Tiger's Spotlight menu) were drawn opaque, their clear pixels
+     black.
 
 Also, the gap between the title bar buttons is 8 px instead of 7, so
 Jaguar's buttons sit 22 px apart, as in Jaguar and in Carbon windows.
@@ -29,16 +34,26 @@ sys.path.insert(0, os.path.dirname(__file__))
 from macho import MachO
 
 # (address, expected word, new word or None for "bl -[NSWindow setOpaque:]", comment)
+def _b(at, to):                 # b to
+    return 0x48000000 | ((to - at) & 0x03fffffc)
+
+
+def _bne7(at, to):              # bne cr7,to
+    return 0x40be0000 | ((to - at) & 0xfffc)
+
+
+# setOpaque: expects its own address in r12, as objc_msgSend leaves it.
 PATCHES_1039 = [
     (0x92f03368, 0x419e0068, 0x48000068, '_commonAwake: always plain _NSCreateWindow (Jaguar-style)'),
-    (0x92f03458, 0x40be0018, 0x60000000, '_commonAwake: if (!isOpaque) ... -> always'),
-    # that block becomes [self setOpaque:NO]; setOpaque: expects its own
-    # address in r12, as objc_msgSend leaves it
-    (0x92f0345c, 0x809c0000, 0x3d8092fc, '_commonAwake: lis r12,hi(-[NSWindow setOpaque:])'),
-    (0x92f03460, 0x7fc3f378, 0x618c4280, '_commonAwake: ori r12,r12,lo'),
-    (0x92f03464, 0x4839dc59, 0x7fc3f378, '_commonAwake: mr r3,self'),
-    (0x92f03468, 0x38800000, 0x38a00000, '_commonAwake: li r5,NO'),
-    (0x92f0346c, 0x480931c5, None,       '_commonAwake: bl -[NSWindow setOpaque:]'),
+    # if (!isOpaque) _NSSetWindowOpacity(NO) stays; an opaque window goes to
+    # [self setOpaque:NO] in the opaque-shape path, unused since the line above
+    (0x92f03458, 0x40be0018, _bne7(0x92f03458, 0x92f0336c), '_commonAwake: if (isOpaque) -> [self setOpaque:NO] below'),
+    (0x92f0336c, 0x809d0000, 0x3d8092fc, '_commonAwake (unused path): lis r12,hi(-[NSWindow setOpaque:])'),
+    (0x92f03370, 0x807e0044, 0x618c4280, '_commonAwake (unused path): ori r12,r12,lo'),
+    (0x92f03374, 0x4839dd49, 0x7fc3f378, '_commonAwake (unused path): mr r3,self'),
+    (0x92f03378, 0x809cbf28, 0x38a00000, '_commonAwake (unused path): li r5,NO'),
+    (0x92f0337c, 0x7c7d1b78, None,       '_commonAwake (unused path): bl -[NSWindow setOpaque:]'),
+    (0x92f03380, 0x7fc3f378, _b(0x92f03380, 0x92f03470), '_commonAwake (unused path): b back, after the opacity block'),
     # 3. Jaguar's button spacing: with Jaguar's buttons (theme.jaguar_window_buttons)
     # Carbon windows space them 22 px apart, Cocoa ones by sizeOfTitlebarButtons
     # (14) + _windowTitlebarButtonSpacingWidth (7; 5 in utility windows): 21.
@@ -48,12 +63,13 @@ PATCHES_1039 = [
 
 PATCHES_10411 = [
     (0x937bad8c, 0x419e00c4, 0x480000c4, '_commonAwake: always plain _NSCreateWindow (Jaguar-style)'),
-    (0x937baee4, 0x40be0018, 0x60000000, '_commonAwake: if (!isOpaque) ... -> always'),
-    (0x937baee8, 0x809e0000, 0x3d80937b, '_commonAwake: lis r12,hi(-[NSWindow setOpaque:])'),
-    (0x937baeec, 0x80610538, 0x618cc750, '_commonAwake: ori r12,r12,lo'),
-    (0x937baef0, 0x4bfeff03, 0x80610538, '_commonAwake: lwz r3,self'),
-    (0x937baef4, 0x38800000, 0x38a00000, '_commonAwake: li r5,NO'),
-    (0x937baef8, 0x48007655, None,       '_commonAwake: bl -[NSWindow setOpaque:]'),
+    (0x937baee4, 0x40be0018, _bne7(0x937baee4, 0x937bad90), '_commonAwake: if (isOpaque) -> [self setOpaque:NO] below'),
+    (0x937bad90, 0x80410538, 0x3d80937b, '_commonAwake (unused path): lis r12,hi(-[NSWindow setOpaque:])'),
+    (0x937bad94, 0x809d0000, 0x618cc750, '_commonAwake (unused path): ori r12,r12,lo'),
+    (0x937bad98, 0x3ba10060, 0x80610538, '_commonAwake (unused path): lwz r3,self'),
+    (0x937bad9c, 0x80620044, 0x38a00000, '_commonAwake (unused path): li r5,NO'),
+    (0x937bada0, 0x4bfeff03, None,       '_commonAwake (unused path): bl -[NSWindow setOpaque:]'),
+    (0x937bada4, 0x90610378, _b(0x937bada4, 0x937baefc), '_commonAwake (unused path): b back, after the opacity block'),
     # 3. as in 10.3.9: Jaguar's buttons 22 px apart
     (0x937df218, 0x3c0040e0, 0x3c004100, '_windowTitlebarButtonSpacingWidth: 7.0 -> 8.0 (non-utility)'),
 ]

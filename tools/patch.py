@@ -265,6 +265,9 @@ TIGER_PATCHES = [
     # Back/Forward 53 -> 56 (2 x 28), View 81 -> 78 (3 x 26). Action and Path
     # draw their 46 px images in 46 px items already (no 'toolbar' fix there).
     ('toolbar', 0x346e8, 0x481c36c9, ('bl_cave', 'segviews'), 'segmented view: bl HISegmentedViewSetSegmentCount -> bl <install Jaguar draw>'),
+    # A segment turned on or off (sub_3a198, e.g. Forward after Back and a
+    # new folder) redraws the whole view, not just HIToolbox's own segment rect.
+    ('toolbar', 0x3a1e0, 0x481bdb50, ('b_cave', 'segenable'), 'segment enable: b HISegmentedViewSetSegmentEnabled -> b <set it, redraw the view>'),
     ('toolbar', 0x343d4, 0x3c004250, 0x3c004260, 'Back/Forward view frame: width 52.0 -> 56.0'),
     ('toolbar', 0x35d88, 0x3c004254, 0x3c004260, 'Back/Forward item size: width 53.0 -> 56.0 (min and max)'),
     ('toolbar', 0x35d9c, 0x3c0042a2, 0x3c00429c, 'View item size: width 81.0 -> 78.0 (min and max)'),
@@ -430,6 +433,8 @@ def apply_tiger(m, path_out, names, quiet):
             sys.exit('mismatch at %08x: %08x != expected %08x (%s)' % (addr, cur, expect, why))
         if isinstance(new, tuple) and new[0] == 'bl_cave':
             new = 0x48000001 | ((entries[new[1]] - addr) & 0x03fffffc)
+        elif isinstance(new, tuple) and new[0] == 'b_cave':     # a tail call
+            new = 0x48000000 | ((entries[new[1]] - addr) & 0x03fffffc)
         elif isinstance(new, tuple) and new[0] == 'cave_ptr':   # a pointer (vtable slot)
             new = entries[new[1]]
         elif isinstance(new, tuple) and new[0] == 'addi_cave':  # addi rX,rX,lo after lis rX,0x32
