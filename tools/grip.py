@@ -14,10 +14,13 @@ It also appends the search splitter's bar, 'PNG ' 8801 (see SPLITTER_ID),
 and replaces the toolbar's Back, Forward and View buttons with Jaguar's
 (toolbar.py); those are appended too, the originals left unreferenced.
 
-With stripes=True (patch.py's 'stripes' set) the divider image is the
-pinstriped sidebar's instead: see STRIPES_*.
+With a sidebar style (patch.py's style sets) the divider image is that
+style's instead: the pinstriped sidebar's (style 'stripes', see STRIPES_*),
+or a 1 px line ('header', 'well': see header_divider_png, well_divider_png);
+'header' also adds the
+sidebar's list header, 'PNG ' 8802 and 8803 (tools/header.py).
 
-usage: grip.py [--stripes] <Finder.rsrc> <out.rsrc> [divider.png [splitter.png]]
+usage: grip.py [--stripes|--header|--well] <Finder.rsrc> <out.rsrc> [divider.png [splitter.png]]
 """
 import sys, os, io, struct, zlib
 sys.path.insert(0, os.path.dirname(__file__))
@@ -168,14 +171,39 @@ def stripes_divider_png(like):
     return png_ga(STRIPES_WIDTH, rows, like, len(like))
 
 
-def build(finder_rsrc, stripes=False):
+def header_divider_png(like):
+    """The 'header' sidebar's divider, padded to len(like) bytes: 7 px
+    (patch.STRIPES_WIDTH, the layout 'header' shares), see-through but for a
+    1 px line by the files (STRIPES_LINE, the status bar's line gray): the
+    divider is erased white, like the sidebar beside it."""
+    cols = [(0, 0)] * (STRIPES_WIDTH - 1) + [(STRIPES_LINE, 255)]
+    return png_ga(STRIPES_WIDTH, [cols] * HEIGHT, like, len(like))
+
+
+def well_divider_png(like):
+    """The 'well' sidebar's divider, padded to len(like) bytes: patch.WELL_MARGIN
+    px, see-through (the divider is erased with the toolbar's pinstripes)
+    but for the 1 px line by the files."""
+    import patch
+    W = patch.WELL_MARGIN
+    cols = [(0, 0)] * (W - 1) + [(STRIPES_LINE, 255)]
+    return png_ga(W, [cols] * HEIGHT, like, len(like))
+
+
+DIVIDERS = {None: divider_png, 'stripes': stripes_divider_png, 'header': header_divider_png, 'well': well_divider_png}
+
+
+def build(finder_rsrc, style=None):
     """Finder.rsrc bytes with the grip replaced (in place), the splitter bar
-    added and the toolbar buttons replaced (both appended). stripes: the
-    divider of the pinstriped sidebar instead of the column view's."""
-    import toolbar
+    added and the toolbar buttons replaced (both appended). style: a sidebar
+    style's divider instead of the column view's ('header' also adds its
+    list header)."""
+    import toolbar, header
+    if style is True:                             # (the old stripes=True)
+        style = 'stripes'
     rf = ResFile(finder_rsrc)
     like = rf.res[('PNG ', GRIP_ID)]['data']
-    png = stripes_divider_png(like) if stripes else divider_png(like)
+    png = DIVIDERS[style](like)
     bar = splitter_png(like)
     buttons = {('PNG ', i): b for i, b in toolbar.build(finder_rsrc).items()}
     out = ResFile(rf.patched_in_place({('PNG ', GRIP_ID): png})).with_added('PNG ', SPLITTER_ID, SPLITTER_NAME, bar)
@@ -183,6 +211,10 @@ def build(finder_rsrc, stripes=False):
     for k, b in sorted(buttons.items()):
         if k not in rf.res:                       # the View control's 6th images (8615-8617)
             out = ResFile(out).with_added(k[0], k[1], None, b)
+    if style == 'header':
+        out = ResFile(out).with_added('PNG ', header.HEADER_ID, header.HEADER_NAME, header.header_png(like))
+        out = ResFile(out).with_added('PNG ', header.HEADER_ID + 1, header.HEADER_NAME + 'Inactive',
+                                      header.header_png(like, inactive=True))
     new = ResFile(out)
     assert new.res[('PNG ', GRIP_ID)]['data'] == png and new.res[('PNG ', SPLITTER_ID)]['data'] == bar
     assert all(new.res[k]['data'] == b for k, b in buttons.items())
@@ -192,10 +224,12 @@ def build(finder_rsrc, stripes=False):
 
 
 if __name__ == '__main__':
-    stripes = '--stripes' in sys.argv
-    if stripes:
-        sys.argv.remove('--stripes')
-    out = build(open(sys.argv[1], 'rb').read(), stripes)
+    style = None
+    for st in ('stripes', 'header', 'well'):
+        if '--' + st in sys.argv:
+            sys.argv.remove('--' + st)
+            style = st
+    out = build(open(sys.argv[1], 'rb').read(), style)
     open(sys.argv[2], 'wb').write(out)
     if len(sys.argv) > 3:
         from PIL import Image

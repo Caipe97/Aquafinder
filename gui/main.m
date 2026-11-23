@@ -35,9 +35,9 @@ static const Part PARTS[] = {
     { "finder", "finder grip", "Aqua Finder windows",
       "Swaps the brushed metal for plain Aqua, with the item count up top like in Jaguar.", NO, -1,
       "finder-metal", "finder-aqua", "finder-stripes" },
-    { "stripes", "stripes", "Pinstriped sidebar",
-      "Adds pinstripes to the sidebar and a slimmer divider.", NO, 0,
-      "sidebar-plain", "sidebar-stripes", NULL },
+    { "sidebar", "stripes header well", "Sidebar:",
+      "Plain, pinstriped, under a list header like the file list's, or as an inset list on pinstripes.", NO, 0,
+      "sidebar-plain", "sidebar-plain", NULL },
     { "titlebars", "titlebars appkit", "Jaguar title bars",
       "Jaguar's pinstriped title bars in every app, see-through in the background. Takes a restart.", YES, -1,
       "titlebar-panther", "titlebar-jaguar", NULL },
@@ -47,6 +47,18 @@ static const Part PARTS[] = {
 };
 #define NPARTS ((int)(sizeof PARTS / sizeof PARTS[0]))
 #define S(c) [NSString stringWithCString:(c)]
+
+/* The "sidebar" row is a pop-up of the Finder's sidebar styles, not a
+ * checkbox: the script's style parts (none: the plain sidebar), and their
+ * names and preview pictures. The script prints a status line per style
+ * part; the one "installed" is the Finder's style. */
+#define SIDEBAR_ROW 1
+#define NSTYLES 4
+static const char *STYLE_PART[NSTYLES] = { NULL, "stripes", "header", "well" };
+static const char *STYLE_TITLE[NSTYLES] = { "Plain", "Pinstriped", "List header", "Inset" };
+static const char *STYLE_NAME[NSTYLES] = { "plain", "pinstriped", "list header", "inset" };
+static const char *STYLE_FINDER[NSTYLES] = { "finder-aqua", "finder-stripes", "finder-header", "finder-well" };
+static const char *STYLE_SIDEBAR[NSTYLES] = { "sidebar-plain", "sidebar-stripes", "sidebar-header", "sidebar-well" };
 
 static int parseState(NSString *line)
 {
@@ -132,7 +144,8 @@ static int combine(int acc, int st, BOOL first)
     NSImageView *beforeView, *afterView;
     NSMutableDictionary *images;
     NSProgressIndicator *spinner;
-    int state[NPARTS], picked;
+    NSPopUpButton *stylePopup;
+    int state[NPARTS], picked, styleNow;
     AuthorizationRef auth;
 }
 - (void)changed:(id)sender;
@@ -201,11 +214,22 @@ static int combine(int acc, int st, BOOL first)
     for (i = 0; i < NPARTS; i++) {
         float x = PARTS[i].parent < 0 ? 8 : 28, rh = ROW_H - 6;   /* options sit under their part */
         RowView *r = [[[RowView alloc] initWithFrame:NSMakeRect(10, top - i * ROW_H - rh, 420, rh)] autorelease];
-        NSButton *b = [[[NSButton alloc] initWithFrame:NSMakeRect(x, rh - 24, 408 - x, 20)] autorelease];
-        [b setButtonType:NSSwitchButton];
-        [b setTitle:S(PARTS[i].title)];
-        [b setFont:PARTS[i].parent < 0 ? [NSFont boldSystemFontOfSize:13] : [NSFont systemFontOfSize:13]];
-        [b setTarget:self]; [b setAction:@selector(changed:)];
+        NSButton *b;
+        if (i == SIDEBAR_ROW) {   /* "Sidebar:" and the styles' pop-up */
+            int k;
+            NSTextField *t = [self label:S(PARTS[i].title) frame:NSMakeRect(x + 2, rh - 23, 60, 18) gray:NO in:r];
+            [t setFont:[NSFont systemFontOfSize:13]];
+            stylePopup = [[[NSPopUpButton alloc] initWithFrame:NSMakeRect(x + 62, rh - 28, 150, 26) pullsDown:NO] autorelease];
+            for (k = 0; k < NSTYLES; k++) [stylePopup addItemWithTitle:S(STYLE_TITLE[k])];
+            [stylePopup setTarget:self]; [stylePopup setAction:@selector(changed:)];
+            b = stylePopup;
+        } else {
+            b = [[[NSButton alloc] initWithFrame:NSMakeRect(x, rh - 24, 408 - x, 20)] autorelease];
+            [b setButtonType:NSSwitchButton];
+            [b setTitle:S(PARTS[i].title)];
+            [b setFont:PARTS[i].parent < 0 ? [NSFont boldSystemFontOfSize:13] : [NSFont systemFontOfSize:13]];
+            [b setTarget:self]; [b setAction:@selector(changed:)];
+        }
         [r addSubview:b];
         [r setTarget:self index:i check:b];
         [[window contentView] addSubview:r];
@@ -295,12 +319,34 @@ static int combine(int acc, int st, BOOL first)
     return @"Not available: a system file here isn't one Aquafinder knows.";
 }
 
+/* The Finder's sidebar style: the style part whose status line says installed (0: plain). */
+- (int)styleInText:(NSString *)text
+{
+    int k;
+    for (k = 1; k < NSTYLES; k++) {
+        NSString *prefix = [S(STYLE_PART[k]) stringByAppendingString:@": Aquafinder installed"];
+        NSArray *lines = [text componentsSeparatedByString:@"\n"];
+        unsigned l;
+        for (l = 0; l < [lines count]; l++)
+            if ([[lines objectAtIndex:l] hasPrefix:prefix]) return k;
+    }
+    return 0;
+}
+
 - (void)refresh
 {
     NSString *text = [self runStatus];
     int i;
     for (i = 0; i < NPARTS; i++) {
         int st = state[i] = [self stateOf:i inText:text];
+        if (i == SIDEBAR_ROW) {   /* the styles' pop-up: the installed one */
+            styleNow = [self styleInText:text];
+            [stylePopup selectItemAtIndex:styleNow];
+            [stylePopup setEnabled:(st != ST_UNKNOWN)];
+            [status[i] setStringValue:st == ST_UNKNOWN ? [self describe:st]
+                : [NSString stringWithFormat:@"Now: %s.", STYLE_NAME[styleNow]]];
+            continue;
+        }
         [box[i] setEnabled:(st != ST_UNKNOWN)];
         [box[i] setState:(st == ST_INSTALLED || st == ST_OLD || st == ST_MIXED) ? NSOnState : NSOffState];
         [status[i] setStringValue:[self describe:st]];
@@ -310,10 +356,23 @@ static int combine(int acc, int st, BOOL first)
     [self changed:nil];
 }
 
+/* The argument for install/restore: the sidebar row's is the style's part. */
+- (NSString *)partFor:(int)i
+{
+    if (i != SIDEBAR_ROW) return S(PARTS[i].part);
+    if ([stylePopup indexOfSelectedItem] == 0) return S(STYLE_PART[styleNow]);   /* restore it */
+    return S(STYLE_PART[[stylePopup indexOfSelectedItem]]);
+}
+
 /* What Apply would do for one part: nil, @"install" or @"restore". */
 - (NSString *)verbFor:(int)i
 {
     if (state[i] == ST_UNKNOWN) return nil;
+    if (i == SIDEBAR_ROW) {   /* a style picked: install it; plain: restore the one installed */
+        int k = [stylePopup indexOfSelectedItem];
+        if (k == styleNow) return nil;
+        return k ? @"install" : @"restore";
+    }
     if ([box[i] state] == NSOnState) return state[i] == ST_INSTALLED ? nil : @"install";
     return state[i] == ST_ORIGINAL ? nil : @"restore";
 }
@@ -323,10 +382,15 @@ static int combine(int acc, int st, BOOL first)
     BOOL any = NO;
     int i;
     /* An option needs its part: ticking it ticks the part, unticking the
-     * part unticks it. */
+     * part unticks it. A sidebar style other than plain is the option on. */
     for (i = 0; i < NPARTS; i++) {
         int p = PARTS[i].parent;
         if (p < 0) continue;
+        if (i == SIDEBAR_ROW) {
+            if (sender == stylePopup && [stylePopup indexOfSelectedItem] && [box[p] isEnabled]) [box[p] setState:NSOnState];
+            if ([box[p] state] == NSOffState) [stylePopup selectItemAtIndex:0];
+            continue;
+        }
         if (sender == box[i] && [box[i] state] == NSOnState && [box[p] isEnabled]) [box[p] setState:NSOnState];
         if ([box[p] state] == NSOffState) [box[i] setState:NSOffState];
     }
@@ -340,20 +404,26 @@ static int combine(int acc, int st, BOOL first)
 }
 
 /* Before: the picked part left out. After: what Apply leaves, so it follows
- * the ticks (and the Finder's picture picks up the pinstriped sidebar). */
+ * the ticks (and the Finder's picture picks up the sidebar style). */
 - (void)showPreview
 {
     const Part *p = &PARTS[picked];
-    BOOL on = [box[picked] state] == NSOnState, opt = NO;
-    int i;
-    for (i = 0; i < NPARTS; i++) {
+    int i, k = [stylePopup indexOfSelectedItem];
+    BOOL on = picked == SIDEBAR_ROW ? k != 0 : [box[picked] state] == NSOnState;
+    for (i = 0; i < NPARTS; i++)
         [row[i] setPicked:(i == picked)];
-        if (PARTS[i].parent == picked && [box[i] state] == NSOnState) opt = YES;
-    }
     [beforeView setImage:[self image:p->before]];
-    [afterView setImage:[self image:!on ? p->before : (opt && p->afterOption) ? p->afterOption : p->after]];
-    [afterLabel setStringValue:!on ? @"After: the stock look (unticked)"
-                             : (opt && p->afterOption) ? @"After, with the pinstriped sidebar" : @"After"];
+    if (picked == SIDEBAR_ROW) {
+        [afterView setImage:[self image:STYLE_SIDEBAR[k]]];
+        [afterLabel setStringValue:on ? [NSString stringWithFormat:@"After: the %s sidebar", STYLE_NAME[k]]
+                                      : @"After: the plain sidebar"];
+    } else if (PARTS[SIDEBAR_ROW].parent == picked && on && k) {
+        [afterView setImage:[self image:STYLE_FINDER[k]]];
+        [afterLabel setStringValue:[NSString stringWithFormat:@"After, with the %s sidebar", STYLE_NAME[k]]];
+    } else {
+        [afterView setImage:[self image:on ? p->after : p->before]];
+        [afterLabel setStringValue:on ? @"After" : @"After: the stock look (unticked)"];
+    }
 }
 
 - (void)pickRow:(RowView *)r
@@ -419,16 +489,20 @@ static int combine(int acc, int st, BOOL first)
         verb[i] = [self verbFor:i];
         if (verb[i]) { any = YES; if (PARTS[i].restart) restart = YES; }
     }
+    /* installing a sidebar style installs the Finder too, in that style */
+    if (verb[SIDEBAR_ROW] && [verb[SIDEBAR_ROW] isEqualToString:@"install"]
+        && verb[PARTS[SIDEBAR_ROW].parent] && [verb[PARTS[SIDEBAR_ROW].parent] isEqualToString:@"install"])
+        verb[PARTS[SIDEBAR_ROW].parent] = nil;
     if (!any) return;
     if (![self authorize]) return;   /* cancelled at the password dialog */
 
     [applyButton setEnabled:NO];
-    for (i = 0; i < NPARTS; i++) [box[i] setEnabled:NO];
+    for (i = 0; i < NPARTS; i++) [box[i] setEnabled:NO];   /* (the pop-up is box[SIDEBAR_ROW]) */
     [footer setStringValue:@"Working..."];
     [spinner startAnimation:nil];
     [window display];
     for (i = 0; i < NPARTS; i++)
-        if (verb[i]) ok = [self run:verb[i] part:S(PARTS[i].part) log:log] && ok;
+        if (verb[i]) ok = [self run:verb[i] part:[self partFor:i] log:log] && ok;
     [spinner stopAnimation:nil];
     [footer setStringValue:@""];
     [self refresh];

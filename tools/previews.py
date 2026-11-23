@@ -5,7 +5,9 @@ Writes gui/preview/<name>.png, 280x170 each, which native-build.sh copies
 into Aquafinder.app/Contents/Resources:
 
   finder-metal  finder-aqua  finder-stripes    a Finder window's top-left corner
+  finder-header finder-well                    (with each sidebar style)
   sidebar-plain sidebar-stripes                its sidebar, a bit lower
+  sidebar-header sidebar-well
   titlebar-panther titlebar-jaguar             TextEdit's title bar, 2x close-up
   logo-panther  logo-jaguar                    About This Mac logo + Finder icon
 
@@ -68,8 +70,12 @@ def build():
         'finder-metal': window('before-after.png', 28, 90),
         'finder-aqua': window('finder-list.png', 28, 50),
         'finder-stripes': window('stripes.png', 40, 30),
+        'finder-header': window('header.png', 40, 30),
+        'finder-well': window('well.png', 40, 30),
         'sidebar-plain': window('finder-list.png', 28, 50, 60),
         'sidebar-stripes': window('stripes.png', 40, 30, 60),
+        'sidebar-header': window('header.png', 40, 30, 60),
+        'sidebar-well': window('well.png', 40, 30, 60),
         'titlebar-panther': closeup('stock-textedit.png', 336, 230),
         'titlebar-jaguar': closeup('titlebars-cocoa-finder.png', 336, 230),
         'logo-panther': logo(True),

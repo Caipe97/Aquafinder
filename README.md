@@ -16,15 +16,33 @@ Make Mac OS X 10.3.9 Panther and 10.4.11 Tiger look and fit better on small scre
   gradient with its grip near the bottom, and no other lines around the panes. Collapse the
   sidebar and the divider stays at the window's left edge, so you can drag it back out.
 - The sidebar divider redraws cleanly when you drag it or resize the window.
-- Optional: a **pinstriped sidebar**. The sidebar gets the window's pinstripes, in
-  step with the item count bar above it, and a slim 7 px divider: the same stripes with a soft
-  shadow falling from a 1 px line by the files, and a small arrow at its middle that stays clear
-  of the window's edge when the sidebar is collapsed. The sidebar and the file list start right
-  under the item count bar's line, as in Jaguar. The stripes stay put when the sidebar scrolls,
-  and behind items you select or drag. Tick it in the Aquafinder app, or run
-  `sudo sh aquafinder.sh install stripes` (`restore stripes` brings back the plain sidebar).
+- Optional: a **sidebar style**. Pick one in the Aquafinder app, or install it with
+  `sudo sh aquafinder.sh install stripes`, `install header` or `install well`
+  (`restore` and the same name bring back the plain sidebar):
+  - **Pinstriped**: the sidebar gets the window's pinstripes, in step with the item count
+    bar above it, and a slim 7 px divider: the same stripes with a soft shadow falling from a
+    1 px line by the files, and a small arrow at its middle that stays clear of the window's
+    edge when the sidebar is collapsed. The sidebar and the file list start right under the
+    item count bar's line, as in Jaguar. The stripes stay put when the sidebar scrolls, and
+    behind items you select or drag.
+  - **List header**: a white sidebar under an Aqua list header labeled "Places", like the
+    file list's column header beside it and like the panes of Jaguar's Address Book, with a
+    1 px line for a divider. The header's label turns gray in an inactive window, as the file
+    list's does.
+  - **Inset**: the sidebar as a white list inset on the window's pinstripes, framed like an
+    Aqua list box (as in Jaguar's System Preferences), with a 1 px line by the files.
 
-  ![Pinstriped sidebar](screens/stripes.png)
+  With the list header and the inset sidebar, the item count bar has no line of its own
+  under it: the top edge is the sidebar's header or the inset list's frame, and over the files
+  the file list's header, or a 1 px line in icon and column view, all on one row. Beside the
+  inset list, the divider's pinstripes run up into the bar.
+
+  | | |
+  |---|---|
+  | ![Pinstriped sidebar](screens/stripes.png) | ![Sidebar under a list header](screens/header.png) |
+  | Pinstriped | List header |
+  | ![Inset sidebar](screens/well.png) | |
+  | Inset | |
 - In search results, the splitter above the path pane is Panther's Aqua splitter bar: a light
   gray bar with a three-line grip in its middle, instead of the metal one. (Panther)
 - In Tiger's search window, the bar with Servers, Computer, Home and Others has the same
@@ -69,7 +87,12 @@ Dock tile are the same files as Panther's.
 | ![Tiger Finder window](screens/tiger-finder-list.png) | ![Tiger search window](screens/tiger-search.png) |
 | A Finder window on Tiger | Tiger's search window |
 
-![Pinstriped sidebar on Tiger](screens/tiger-stripes.png)
+| | |
+|---|---|
+| ![Pinstriped sidebar on Tiger](screens/tiger-stripes.png) | ![Sidebar under a list header on Tiger](screens/tiger-header.png) |
+| Pinstriped sidebar on Tiger | List header on Tiger |
+| ![Inset sidebar on Tiger](screens/tiger-well.png) | |
+| Inset sidebar on Tiger | |
 
 ## Install
 
@@ -101,7 +124,8 @@ To **update** to a newer version, run the same `install` command with the new sc
 It upgrades files patched by an older version, starting from the saved originals.
 
 You can also install just one part: `install finder`, `install titlebars` or `install logo`.
-`install stripes` adds the pinstriped sidebar to the Finder part (`install finder` keeps
+`install stripes`, `install header` or `install well` switches the Finder part to that sidebar
+style, and `restore` with the same name back to the plain one (`install finder` keeps
 whichever sidebar is installed).
 Check what's installed with `sh aquafinder.sh status`.
 
@@ -155,6 +179,10 @@ since nothing current can compile PowerPC Cocoa code. Rebuild the script first, 
 tools/mknative.sh 1.0
 ```
 
+The sidebar header's images are built by `tools/header.py`: the Aqua list header's texture,
+measured from a running Finder, with the "Places" label as Cocoa draws it (rendered once in a VM
+by `tools/label.m`; its pixels are kept in `header.py`).
+
 The app's icon (`gui/Aquafinder.icns`) is drawn by `tools/appicon.py`, and its before/after
 pictures (`gui/preview/`) are cut from `screens/` by `tools/previews.py`; rerun those after
 changing them.
@@ -164,8 +192,8 @@ and fetches `dist/Aquafinder.dmg`. The same app and package run on Tiger. If sud
 command to run in Terminal on the Mac; then fetch the result with `FETCH_ONLY=1 tools/mknative.sh 1.0`. Both the app and the package run `aquafinder.sh` to do the work,
 so they make the same checks.
 
-Tiger's Finder changes are in `TIGER_PATCHES` (and `TIGER_STRIPES_PATCHES` for the pinstriped
-sidebar) in `tools/patch.py`, at 10.4.11's own addresses
+Tiger's Finder changes are in `TIGER_PATCHES` (and `TIGER_STRIPES_PATCHES`, `TIGER_HEADER_PATCHES`
+and `TIGER_WELL_PATCHES` for the sidebar styles) in `tools/patch.py`, at 10.4.11's own addresses
 (its code is too different for the signature matching used for Panther builds), with the new
 drawing code in `tools/cave.py`. Tiger's Back/Forward and View controls are theme-drawn
 segmented views, so its 'toolbar' set gives each one a small Carbon event handler

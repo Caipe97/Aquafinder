@@ -120,7 +120,7 @@ TOPBAR_ROWS = 20
 TOPBAR_LINE = 163
 
 
-def build_topbar(cave, hook, stubs, line_gray=BAR_LINE / 255.0):
+def build_topbar(cave, hook, stubs, line_gray=BAR_LINE / 255.0, keep_last_row=False):
     """cave: address of the routine; hook: address of the hooked 'li r3,0x34'
     (the host epilogue is at hook+0x18); stubs: import name -> stub address.
     The status bar of a browser window gets the usual Aqua erase, then the
@@ -130,6 +130,10 @@ def build_topbar(cave, hook, stubs, line_gray=BAR_LINE / 255.0):
     so the lines are placed from the port bounds, not from the rect; the
     object in r31 isn't the pane itself, so LPane's frame getters don't work
     on it. This needs its own stack frame (0x80); the host already saved LR.
+    keep_last_row (the 'header' and 'well' sidebar styles): the bar's last
+    row is left alone, neither erased nor lined: the splitter paints it
+    (the top edge of the sidebar and the files, patch.py EDGE_*), so the
+    erase goes to a copy of the rect, clipped above that row.
     Returns (bytes, {'gray': address of the float line gray})."""
     a = Asm(cave)
     r0, r1, r3, r4, r5, r30, r31 = 0, 1, 3, 4, 5, 30, 31
@@ -138,20 +142,45 @@ def build_topbar(cave, hook, stubs, line_gray=BAR_LINE / 255.0):
     a.lwz(r0, 0x120, r31)            # view->metal: the status bar of a browser window?
     a.cmpwi(r0, 0)
     a.beq('original')
-    a.li(r3, 0x34)                   # the original Aqua erase
-    a.li(r4, 0x20)
-    a.li(r5, 1)
-    a.bl(stubs['_SetThemeBackground'])
-    a.mr(r3, r30)
-    a.bl(stubs['_EraseRect'])
-    a.stwu(r1, -0x80, r1)
-    a.addi(r3, r1, 0x40)             # save pen color -> 0x40
-    a.bl(stubs['_GetForeColor'])
-    a.addi(r3, r1, 0x58)             # GetPort(0x58); GetPortBounds(port, 0x58)
-    a.bl(stubs['_GetPort'])
-    a.lwz(r3, 0x58, r1)
-    a.addi(r4, r1, 0x58)
-    a.bl(stubs['_GetPortBounds'])
+    if keep_last_row:
+        a.stwu(r1, -0x80, r1)
+        a.addi(r3, r1, 0x58)         # GetPort(0x58); GetPortBounds(port, 0x58)
+        a.bl(stubs['_GetPort'])
+        a.lwz(r3, 0x58, r1)
+        a.addi(r4, r1, 0x58)
+        a.bl(stubs['_GetPortBounds'])
+        a.lwz(r0, 0, r30); a.stw(r0, 0x70, r1)      # the rect, clipped above the last row
+        a.lwz(r0, 4, r30); a.stw(r0, 0x74, r1)
+        a.lha(r5, 0x58, r1)
+        a.addi(r5, r5, TOPBAR_ROWS - 1)
+        a.lha(r0, 0x74, r1)
+        a.cmpw(r0, r5)
+        a.ble('clipped')
+        a.sth(r5, 0x74, r1)
+        a.label('clipped')
+        a.li(r3, 0x34)               # the original Aqua erase, of the copy
+        a.li(r4, 0x20)
+        a.li(r5, 1)
+        a.bl(stubs['_SetThemeBackground'])
+        a.addi(r3, r1, 0x70)
+        a.bl(stubs['_EraseRect'])
+        a.addi(r3, r1, 0x40)         # save pen color -> 0x40
+        a.bl(stubs['_GetForeColor'])
+    else:
+        a.li(r3, 0x34)               # the original Aqua erase
+        a.li(r4, 0x20)
+        a.li(r5, 1)
+        a.bl(stubs['_SetThemeBackground'])
+        a.mr(r3, r30)
+        a.bl(stubs['_EraseRect'])
+        a.stwu(r1, -0x80, r1)
+        a.addi(r3, r1, 0x40)         # save pen color -> 0x40
+        a.bl(stubs['_GetForeColor'])
+        a.addi(r3, r1, 0x58)         # GetPort(0x58); GetPortBounds(port, 0x58)
+        a.bl(stubs['_GetPort'])
+        a.lwz(r3, 0x58, r1)
+        a.addi(r4, r1, 0x58)
+        a.bl(stubs['_GetPortBounds'])
     a.li(r0, v16 - 0x10000 if v16 >= 0x8000 else v16)
     a.sth(r0, 0x60, r1)
     a.sth(r0, 0x62, r1)
@@ -168,13 +197,14 @@ def build_topbar(cave, hook, stubs, line_gray=BAR_LINE / 255.0):
     a.sth(r0, 0x6e, r1)
     a.addi(r3, r1, 0x68)
     a.bl(stubs['_PaintRect'])        # top line
-    a.lha(r5, 0x58, r1)              # row = port.top + TOPBAR_ROWS - 1
-    a.addi(r5, r5, TOPBAR_ROWS - 1)
-    a.sth(r5, 0x68, r1)
-    a.addi(r0, r5, 1)
-    a.sth(r0, 0x6c, r1)
-    a.addi(r3, r1, 0x68)
-    a.bl(stubs['_PaintRect'])        # bottom line
+    if not keep_last_row:
+        a.lha(r5, 0x58, r1)          # row = port.top + TOPBAR_ROWS - 1
+        a.addi(r5, r5, TOPBAR_ROWS - 1)
+        a.sth(r5, 0x68, r1)
+        a.addi(r0, r5, 1)
+        a.sth(r0, 0x6c, r1)
+        a.addi(r3, r1, 0x68)
+        a.bl(stubs['_PaintRect'])    # bottom line
     a.addi(r3, r1, 0x40)             # restore pen color
     a.bl(stubs['_RGBForeColor'])
     a.addi(r1, r1, 0x80)
@@ -195,7 +225,7 @@ def build_topbar(cave, hook, stubs, line_gray=BAR_LINE / 255.0):
 DIVIDER_BRUSH = -2             # kThemeBrushWhite
 
 
-def build_divider_erase(addr, stubs, frame_fn, ext, brush=DIVIDER_BRUSH):
+def build_divider_erase(addr, stubs, frame_fn, ext, brush=DIVIDER_BRUSH, bottom_row=False):
     """DividerErase, called instead of `bl GetWindowPort` right before the
     sidebar divider opens its QDBeginCGContext bracket, both in its draw
     routine and in the splitter repaint while it is dragged (r31 = the
@@ -214,6 +244,8 @@ def build_divider_erase(addr, stubs, frame_fn, ext, brush=DIVIDER_BRUSH):
         columns on both sides and erases it, then branches back to 'back'
 
     then tail-call GetWindowPort with the host's r3 (its window).
+    bottom_row ('well'): erase the bottom row too (no border line there, and
+    nothing else paints it).
     Returns (bytes, address of 'back')."""
     a = Asm(addr)
     r0, r1, r3, r4, r5, r31 = 0, 1, 3, 4, 5, 31
@@ -233,9 +265,10 @@ def build_divider_erase(addr, stubs, frame_fn, ext, brush=DIVIDER_BRUSH):
     a.lha(r4, 0x4a, r1)
     a.lha(r5, 0x48, r1)
     a.bl(stubs['_OffsetRect'])
-    a.lha(r4, 0x44, r1)              # r.bottom -= 1 (not r0: addi reads it as 0)
-    a.addi(r4, r4, -1)
-    a.sth(r4, 0x44, r1)
+    if not bottom_row:
+        a.lha(r4, 0x44, r1)          # r.bottom -= 1 (not r0: addi reads it as 0)
+        a.addi(r4, r4, -1)
+        a.sth(r4, 0x44, r1)
     a.li(r3, brush)
     a.li(r4, 32)                     # depth
     a.li(r5, 1)                      # isColorDevice
@@ -463,9 +496,11 @@ TIGER_BAR_STUBS = ['_CGContextSetRGBFillColor', '_CGContextFillRect']
 PINSTRIPES = (250, 255, 250, 233)   # Jaguar's toolbar rows below the top line
 
 
-def build_tiger_bar(cave, stubs, line=TOPBAR_LINE, top_line=False):
+def build_tiger_bar(cave, stubs, line=TOPBAR_LINE, top_line=False, stash=None):
     """cave: where the routine goes (constants first, then the entry point).
-    Called as fill(view r3, ctx r4). Returns (bytes, entry address)."""
+    Called as fill(view r3, ctx r4). stash ('well'): the address of a word
+    the view goes to, for the status bar's edge routine later in the same
+    draw (build_tiger_edge). Returns (bytes, entry address)."""
     consts = struct.pack('>6f', 1.0, line / 255.0, *[g / 255.0 for g in PINSTRIPES])
     ONE, LINE, TAB, TAB_END = 0, 4, 8, 8 + 4 * len(PINSTRIPES)
     entry = cave + len(consts)
@@ -482,6 +517,9 @@ def build_tiger_bar(cave, stubs, line=TOPBAR_LINE, top_line=False):
         a.stw(rr, 0x70 + 4 * k, r1)
     a.mr(r30, r3)                         # view
     a.mr(r31, r4)                         # ctx
+    if stash:
+        a.lis(r9, (stash + 0x8000) >> 16)
+        a.stw(r3, stash & 0xffff, r9)
     a.bl(TIGER_BAR_FILL)                  # the original fill
     a.addi(r3, r1, 0x40)
     a.mr(r4, r30)
@@ -887,6 +925,330 @@ def build_centered_draw(addr, end):
     return code + struct.pack('>I', 0x60000000) * ((end - addr - len(code)) // 4)
 
 
+# --- 'header' (patch.py): the sidebar's Aqua list header (Panther 10.3.9).
+#
+# The splitter's DrawSelf (TSidebarSplitter, inside its QDBeginCGContext
+# bracket, ctx at 0x44 of its frame) outlined both panes after the divider;
+# 'gap' made those calls nops. With 'header' the first (skipped when the
+# sidebar is collapsed) calls SidebarHeader instead: the header image
+# (tools/header.py, 'PNG ' 8802) over the 17 rows above the sidebar, which
+# the layout moved down by as much (patch.py HEADER_*), from the splitter's
+# left edge to the divider's line, the divider's last column.
+SIDEBAR_HEADER_STUBS = ['_GetPort', '_GetWindowFromPort', '_IsWindowHilited', '_GetResource',
+                        '_CGContextResetClip', '_CGContextClipToRect', '_CGContextDrawImage',
+                        '_CGContextSetGrayFillColor', '_CGContextFillRect']
+DIVIDER_LEFT = 0xd6            # TSidebarSplitter: the divider rect's left (local)
+SPLITTER_COLLAPSED = 0xc8      # TSidebarSplitter: nonzero while the sidebar is collapsed
+# The top edge of the 'header' and 'well' styles: the status bar's last row,
+# painted by the splitter (the bar leaves it, build_topbar keep_last_row),
+# a 1 px line over the files (the file pane starts a row higher, so its own
+# first row, the list header's line or the icon view's white, is hidden
+# under it) and the sidebar: the header's first row, or the well's frame.
+EDGE_HEADER = 158              # the list header's top line (its texture's commonest gray)
+
+
+def build_sidebar_header(head, tail, rest, statics, loader, frame_fn, cgrect_port, stubs, rsrc_id, rows, width,
+                         edge=EDGE_HEADER):
+    """SidebarHeader(r3 = splitter, r4 = ctx), in three pieces (head, tail,
+    rest: dead stretches of code, each branching to the next):
+
+        k = IsWindowHilited(GetWindowFromPort(GetPort())) ? 0 : 1
+        holder = statics + 8 k; if !holder.image:
+            h = GetResource('PNG ', rsrc_id + k); if h: loader(holder, h)
+        frame_fn(&r, splitter)              divider frame, port coordinates
+        line = {r.top - 1, r.left, r.top, r.left + 4096}     the top edge
+        hdr  = {r.top - 1, r.left - divider's local left, r.top + rows - 1, r.right - 1}
+        reset the clip; fill line in `edge` gray (the files' top edge, the
+        status bar's last row: the bar leaves it to us, cave.build_topbar)
+        unless collapsed: clip to hdr; draw the image at {hdr.x, hdr.y, width, rows}
+
+    The header's first row (its top line) is the bar's last row too, in
+    line with the file list's header, whose own first row the bar hides.
+    Image rsrc_id is the header of an active window, rsrc_id + 1 that of an
+    inactive one (its label gray, as the file list's). The divider's draw
+    left the context clipped to the divider, hence the reset (the window's
+    backing store is its own: nothing outside it can be drawn over); the
+    clip needs no undoing, the bracket ends after the pane outline calls.
+    statics: 16 zero bytes of the data segment's zero-fill tail, the
+    loader's two holders (image, data provider): each image is loaded once,
+    as the divider's grip is. Returns (head, tail, rest) bytes."""
+    r0, r1, r3, r4, r5, r8, r9, r10, r11, r28, r29, r30, r31 = 0, 1, 3, 4, 5, 8, 9, 10, 11, 28, 29, 30, 31
+    def flt(v): return struct.unpack('>I', struct.pack('>f', v))[0]
+    assert flt(width) & 0xffff == 0
+    c = Asm(rest)                         # unless collapsed: the image; the epilogue
+    c.lwz(r0, SPLITTER_COLLAPSED, r31)
+    c.cmpwi(r0, 0)
+    c.bne('done')
+    c.mr(r3, r30)
+    c.addi(r9, r1, 0x50)
+    c.lswi(r4, r9, 16)
+    c.bl(stubs['_CGContextClipToRect'])
+    c.lis(r0, flt(width) >> 16)           # the image's own width (its height: hdr's, rows)
+    c.stw(r0, 0x58, r1)
+    c.mr(r3, r30)
+    c.addi(r9, r1, 0x50)
+    c.lswi(r4, r9, 16)
+    c.lwz(r8, 0, r29)
+    c.bl(stubs['_CGContextDrawImage'])
+    c.label('done')
+    c.lwz(r0, 0x88, r1)
+    c.addi(r1, r1, 0x80)
+    c.mtlr(r0)
+    _lmw(c, 28, -16, r1)
+    c.blr()
+    rest_code, done = c.assemble(), c.labels['done']
+    b = Asm(tail)
+    b.addi(r3, r1, 0x40)                  # r: {top, left, bottom, right} at 0x40
+    b.mr(r4, r31)
+    b.bl(frame_fn)
+    b.lha(r10, 0x40, r1)                  # line at 0x48
+    b.addi(r11, r10, -1)
+    b.sth(r11, 0x48, r1)
+    b.sth(r10, 0x4c, r1)
+    b.lha(r10, 0x42, r1)
+    b.sth(r10, 0x4a, r1)
+    b.addi(r10, r10, 4096)
+    b.sth(r10, 0x4e, r1)
+    b.lha(r10, 0x46, r1)                  # hdr at 0x40: right before the divider's line
+    b.addi(r10, r10, -1)
+    b.sth(r10, 0x46, r1)
+    b.lha(r10, 0x40, r1)                  # rows from the bar's last row
+    b.addi(r11, r10, rows - 1)
+    b.sth(r11, 0x44, r1)
+    b.addi(r10, r10, -1)
+    b.sth(r10, 0x40, r1)
+    b.lha(r10, 0x42, r1)                  # left: the splitter's (the sidebar's) edge
+    b.lha(r9, DIVIDER_LEFT, r31)
+    b.subf(r10, r9, r10)
+    b.sth(r10, 0x42, r1)
+    b.addi(r3, r1, 0x60)                  # line -> CG at 0x60, hdr -> 0x50
+    b.mr(r4, r31)
+    b.addi(r5, r1, 0x48)
+    b.bl(cgrect_port)
+    b.addi(r3, r1, 0x50)
+    b.mr(r4, r31)
+    b.addi(r5, r1, 0x40)
+    b.bl(cgrect_port)
+    b.mr(r3, r30)
+    b.bl(stubs['_CGContextResetClip'])
+    consts = 0                            # patched below: the tail's own constants
+    b.mr(r3, r30)
+    b.lis(r9, 0); fix = len(b.words) - 1
+    b.lfs(1, 0, r9); b.lfs(2, 0, r9)
+    b.bl(stubs['_CGContextSetGrayFillColor'])
+    b.mr(r3, r30)
+    b.addi(r9, r1, 0x60)
+    b.lswi(r4, r9, 16)
+    b.bl(stubs['_CGContextFillRect'])
+    b.b(rest)
+    consts = b.pc
+    b.data(struct.pack('>2f', edge / 255.0, 1.0))
+    b.words[fix] = d_form(15, r9, 0, (consts + 0x8000) >> 16)
+    b.words[fix + 1] = d_form(48, 1, r9, consts & 0xffff)
+    b.words[fix + 2] = d_form(48, 2, r9, (consts + 4) & 0xffff)
+    tail_code = b.assemble()
+    a = Asm(head)
+    a.mflr(r0)
+    _stmw(a, 28, -16, r1)
+    a.stw(r0, 8, r1)
+    a.stwu(r1, -0x80, r1)
+    a.mr(r31, r3)                         # splitter
+    a.mr(r30, r4)                         # ctx
+    a.addi(r3, r1, 0x60)                  # the window: hilited (active) or not
+    a.bl(stubs['_GetPort'])
+    a.lwz(r3, 0x60, r1)
+    a.bl(stubs['_GetWindowFromPort'])
+    a.bl(stubs['_IsWindowHilited'])
+    _rlwinm(a, r3, r3, 0, 24, 31)         # Boolean
+    a.lis(r29, (statics + 0x8000) >> 16)
+    a.addi(r29, r29, statics & 0xffff)
+    a.li(r28, rsrc_id)
+    a.cmpwi(r3, 0)
+    a.bne('picked')
+    a.addi(r29, r29, 8)                   # inactive: the second holder, the next id
+    a.li(r28, rsrc_id + 1)
+    a.label('picked')
+    a.lwz(r0, 0, r29)
+    a.cmpwi(r0, 0)
+    a.bne('go')
+    a.lis(r3, 0x504e)                     # 'PNG '
+    a.emit(d_form(24, r3, r3, 0x4720))    # ori r3,r3,0x4720
+    a.mr(r4, r28)
+    a.bl(stubs['_GetResource'])
+    a.cmpwi(r3, 0)
+    a.beq('go')                           # (no image: the line all the same; the draw skips a null image)
+    a.mr(r4, r3)
+    a.mr(r3, r29)
+    a.bl(loader)
+    a.label('go')                         # (tail is too far for a bc)
+    a.b(tail)
+    return a.assemble(), tail_code, rest_code
+
+
+# --- 'well' (patch.py): the sidebar as a white inset list on the window's
+# pinstripes, framed like an Aqua list box (Panther 10.3.9). The layout puts
+# the sidebar WELL_MARGIN px in from the splitter's left, top and bottom
+# edges and from the divider, which is WELL_MARGIN px of stripes ending in a
+# 1 px line. In the splitter's DrawSelf, DividerErase erases the whole strip
+# left of the files (the sidebar's margins and the divider) with the toolbar
+# brush: the pinstripes, in phase with the status bar's, which the sidebar
+# then paints over in white (build_divider_outset_well); then WellFrame
+# (build_well_frame) draws the list box's frame, 1 px around the sidebar, in
+# the bracket's place of the pane outlines.
+WELL_TOP = 142                 # an Aqua list box's frame (NSScrollView's bezel, measured on 10.3.9)
+WELL_SIDES = 190
+WELL_BAR_STRIPE = 250          # the status bar's last row, in its pinstripes (port row 19)
+WELL_FRAME_STUBS = ['_CGContextResetClip', '_CGContextSetGrayFillColor', '_CGContextFillRect']
+
+
+def build_divider_outset_well(addr, back, stubs, drawself_ret):
+    """DividerOutset for 'well' (the tail of DividerErase, on its frame: r at
+    0x40, its return address at 0x68, r31 the splitter): called from the
+    splitter's DrawSelf (returning to drawself_ret), r.left goes to the
+    splitter's left edge (the divider's local left back): the whole strip
+    is erased; from the splitter repaint while dragging, the divider only
+    (the sidebar isn't redrawn then). Then EraseRect(&r), back."""
+    a = Asm(addr)
+    r0, r1, r3, r4, r5, r31 = 0, 1, 3, 4, 5, 31
+    a.lwz(r0, 0x68, r1)
+    a.lis(r4, drawself_ret >> 16)
+    a.emit(d_form(24, r4, r4, drawself_ret & 0xffff))   # ori
+    a.cmpw(r0, r4)
+    a.bne('erase')
+    a.lha(r4, 0x42, r1)
+    a.lha(r5, DIVIDER_LEFT, r31)
+    a.subf(r4, r5, r4)
+    a.sth(r4, 0x42, r1)
+    a.label('erase')
+    a.addi(r3, r1, 0x40)
+    a.bl(stubs['_EraseRect'])
+    a.b(back)
+    return a.assemble()
+
+
+def build_well_frame(head, tail, rest, frame_fn, cgrect_port, stubs, margin, top=WELL_TOP, sides=WELL_SIDES):
+    """WellFrame(r3 = splitter, r4 = ctx), in three pieces (head, tail, rest,
+    each branching to the next; rest ends in the constants):
+
+        frame_fn(&r, splitter)                    divider frame, port coordinates
+        o = {r.top - 1, r.left - divider's local left + margin - 1,
+             r.bottom - margin + 1, r.left}       1 px around the sidebar, the
+                                                  bar's last row for its top
+        cgrect_port(&c, splitter, &o); reset the clip (the divider's draw
+        left it on the divider)
+        the top row (the status bar's last, cave.EDGE_*), on to the window's
+        right: the bar's pinstripe gray, then from the divider's line on the
+        files' top edge in `top` gray
+        unless collapsed: c's left and right columns and bottom row in
+        `sides` gray (the sidebar has drawn itself), c's top row in `top`
+        gray (over the sidebar only: the divider's pinstripes run up into
+        the bar beside it)
+    Fills go through a helper, fill(f1 = gray, r28 = the rect). Returns
+    (head, tail, rest) bytes."""
+    r0, r1, r3, r4, r5, r9, r10, r28, r29, r30, r31 = 0, 1, 3, 4, 5, 9, 10, 28, 29, 30, 31
+    ONE, WIDE, SIDES, TOP, STRIPE, MM1 = 0, 4, 8, 12, 16, 20
+    k = struct.pack('>6f', 1.0, 4096.0, sides / 255.0, top / 255.0, WELL_BAR_STRIPE / 255.0, float(margin - 1))
+    # c at 0x50 {x, y, w, h}; the top row's rect at 0x60; the frame's sides at 0x40
+    c = Asm(rest)                         # the sidebar's top line, the epilogue, the constants
+    c.lfs(0, 0x50, r1); c.stfs(0, 0x60, r1)
+    c.lfs(0, 0x58, r1); c.stfs(0, 0x68, r1)
+    c.addi(r28, r1, 0x60)
+    c.lfs(1, TOP, r29)
+    c.bl(tail)                            # (fill: the tail's first routine)
+    c.label('done')
+    c.lwz(r0, 0x98, r1)
+    c.addi(r1, r1, 0x90)
+    c.mtlr(r0)
+    _lmw(c, 28, -16, r1)
+    c.blr()
+    consts = c.pc
+    c.data(k)
+    done = c.labels['done']
+    b = Asm(tail)
+    b.label('fill')                       # fill(f1 gray, r28 rect): on our frame (0x90: saved
+                                          # r28..r31 at 0x80..0x8f), LR at 0x7c
+    b.mflr(r0)
+    b.stw(r0, 0x7c, r1)
+    b.mr(r3, r30)
+    b.lfs(2, ONE, r29)
+    b.bl(stubs['_CGContextSetGrayFillColor'])
+    b.mr(r3, r30)
+    b.lswi(r4, r28, 16)
+    b.bl(stubs['_CGContextFillRect'])
+    b.lwz(r0, 0x7c, r1)
+    b.mtlr(r0)
+    b.blr()
+    b.label('entry')
+    b.addi(r28, r1, 0x60)                 # the top row: {0, y + h - 1, 4096, 1}
+    b.li(r0, 0); b.stw(r0, 0x60, r1)
+    b.lfs(0, WIDE, r29); b.stfs(0, 0x68, r1)
+    b.lfs(1, STRIPE, r29)
+    b.bl('fill')                          # pinstripe gray
+    b.lfs(0, 0x50, r1); b.lfs(13, 0x58, r1); b.fadds(0, 0, 13)   # from the divider's line: x + w + m - 1
+    b.lfs(13, MM1, r29); b.fadds(0, 0, 13); b.stfs(0, 0x60, r1)
+    b.lfs(1, TOP, r29)
+    b.bl('fill')                          # the files' top edge
+    b.lwz(r0, SPLITTER_COLLAPSED, r31)
+    b.cmpwi(r0, 0)
+    b.bne('out')
+    b.addi(r9, r1, 0x50)                  # the frame's sides: a copy of c at 0x40
+    b.lswi(r4, r9, 16)
+    b.addi(r28, r1, 0x40)
+    b.stswi(r4, r28, 16)
+    b.lfs(0, ONE, r29); b.stfs(0, 0x48, r1)
+    b.lfs(1, SIDES, r29)
+    b.bl('fill')                          # left {x, y, 1, h}
+    b.lfs(0, 0x50, r1); b.lfs(13, 0x58, r1); b.fadds(0, 0, 13); b.lfs(13, ONE, r29); b.fsubs(0, 0, 13)
+    b.stfs(0, 0x40, r1)
+    b.lfs(1, SIDES, r29)
+    b.bl('fill')                          # right {x + w - 1, y, 1, h}
+    b.lfs(0, 0x50, r1); b.stfs(0, 0x40, r1)
+    b.lfs(0, 0x58, r1); b.stfs(0, 0x48, r1)
+    b.lfs(0, ONE, r29); b.stfs(0, 0x4c, r1)
+    b.lfs(1, SIDES, r29)
+    b.bl('fill')                          # bottom {x, y, w, 1}
+    b.b(rest)
+    b.label('out')
+    b.b(done)
+    tail_code, entry = b.assemble(), b.labels['entry']
+    assert c.labels.get('done') and tail == b.labels['fill']
+    a = Asm(head)
+    a.mflr(r0)
+    _stmw(a, 28, -16, r1)
+    a.stw(r0, 8, r1)
+    a.stwu(r1, -0x90, r1)
+    a.mr(r31, r3)                         # splitter
+    a.mr(r30, r4)                         # ctx
+    a.addi(r3, r1, 0x40)
+    a.mr(r4, r31)
+    a.bl(frame_fn)
+    a.lha(r10, 0x40, r1)                  # top: the bar's last row
+    a.addi(r10, r10, -1)
+    a.sth(r10, 0x40, r1)
+    a.lha(r10, 0x42, r1)                  # right: the divider's left
+    a.sth(r10, 0x46, r1)
+    a.lha(r9, DIVIDER_LEFT, r31)          # left: the splitter's edge + margin - 1
+    a.subf(r10, r9, r10)
+    a.addi(r10, r10, margin - 1)
+    a.sth(r10, 0x42, r1)
+    a.lha(r10, 0x44, r1)                  # bottom - margin + 1
+    a.addi(r10, r10, 1 - margin)
+    a.sth(r10, 0x44, r1)
+    a.addi(r3, r1, 0x50)
+    a.mr(r4, r31)
+    a.addi(r5, r1, 0x40)
+    a.bl(cgrect_port)
+    a.mr(r3, r30)
+    a.bl(stubs['_CGContextResetClip'])
+    a.lis(r29, (consts + 0x8000) >> 16)
+    a.addi(r29, r29, consts & 0xffff)     # r29 = the constants
+    a.lfs(0, 0x54, r1); a.lfs(13, 0x5c, r1); a.fadds(0, 0, 13)   # the top row: y + h - 1, 1 high
+    a.lfs(13, ONE, r29); a.fsubs(0, 0, 13)
+    a.stfs(0, 0x64, r1); a.stfs(13, 0x6c, r1)
+    a.b(entry)
+    return a.assemble(), tail_code, c.assemble()
+
+
 # --- 'stripes' on Tiger 10.4.11 (patch.py TIGER_STRIPES_PATCHES).
 #
 # The sidebar view's draw (sub_79c40) fills the dirty part of its bounds with
@@ -918,7 +1280,7 @@ TIGER_SIDEBAR_VTABLE = 0x3a81d8       # the sidebar view's vtable (its Draw, slo
 TIGER_SCROLL_OPAQUE = 0x2e50c         # sub_2e50c(obj): the view's opaque feature bit
 
 
-def build_tiger_stripes(cave, stubs, phase=TIGER_STRIPES_PHASE, vtable=TIGER_SIDEBAR_VTABLE):
+def build_tiger_stripes(cave, stubs, phase=TIGER_STRIPES_PHASE, vtable=TIGER_SIDEBAR_VTABLE, only_stripes=False):
     """cave: where the routines go (constants first). Entry points:
       stripes(ctx r3, CGRect *r4, view r5): r4's rows striped (view coords;
         r5 a Finder view object, its HIViewRef at TIGER_HIVIEW)
@@ -928,7 +1290,9 @@ def build_tiger_stripes(cave, stubs, phase=TIGER_STRIPES_PHASE, vtable=TIGER_SID
         the view in r30
       divider(view r3, ctx r4): stands in for the splitter Draw's call of
         sub_3f304 (see build_tiger_divider)
-    Returns (bytes, {'sidefill': addr, 'divider': addr})."""
+    only_stripes: the stripes routine alone (and the constants it reads).
+    Returns (bytes, {'sidefill': addr, 'divider': addr, ...}) or, only_stripes,
+    (bytes, {'stripes_fn': addr})."""
     import grip
     W = grip.STRIPES_WIDTH
     cols = [(float(W - 1), grip.STRIPES_LINE / 255.0, 1.0)]
@@ -943,6 +1307,8 @@ def build_tiger_stripes(cave, stubs, phase=TIGER_STRIPES_PHASE, vtable=TIGER_SID
     consts += struct.pack('>4f', 1.0, 4096.0 + phase, 8388608.0, 0.5)      # 16 ONE BIAS BIG HALF
     consts += struct.pack('>2f', 0.0, float(half))                          # 32 ZERO HALFA
     COLS = len(consts)
+    if only_stripes:
+        cols, pix = [], []
     for c in cols:
         consts += struct.pack('>3f', *c)
     PIX = len(consts)
@@ -1009,6 +1375,8 @@ def build_tiger_stripes(cave, stubs, phase=TIGER_STRIPES_PHASE, vtable=TIGER_SID
     a.b('row')
     a.label('sdone')
     epilogue(0x80)
+    if only_stripes:
+        return a.assemble(), {'stripes_fn': a.labels['stripes']}
 
     # sidefill(ctx r3, rect r4..r7), view = the caller's r28 (sub_3f6e4,
     # the sidebar's Draw: its back color fill), and itemfill, view = r30
@@ -1109,7 +1477,507 @@ def build_tiger_stripes(cave, stubs, phase=TIGER_STRIPES_PHASE, vtable=TIGER_SID
     a.blr()
     code = a.assemble()
     return code, {'sidefill': a.labels['sidefill'], 'itemfill': a.labels['itemfill'], 'sdivider': a.labels['divider'],
-                  'sopaque': a.labels['opaque']}
+                  'sopaque': a.labels['opaque'], 'stripes_fn': a.labels['stripes']}
+
+
+# --- 'header' on Tiger 10.4.11 (patch.py TIGER_HEADER_PATCHES): the
+# sidebar under an Aqua list header. The splitter's sidebar margins are 0
+# but the top one, 17 - 1: the header's first row (its top line) is the
+# status bar's last, which the bar draws as the top edge (build_tiger_edge),
+# so the header shows its rows below that; the file pane's top margin is -1,
+# its own first row hidden above the splitter, under that edge, as on
+# Panther (cave.EDGE_*); its left one goes. The divider keeps its stock 7 px.
+# The splitter's Draw calls build_tiger_header's routine instead of its
+# background + DrawDivider: its background (white), the divider's line (its
+# last column), and, unless the sidebar is collapsed (the divider at x 0),
+# the header image (tools/header.py: 'PNG ' 8802, or 8803 when the splitter
+# is inactive) from the splitter's left edge to the line, a row up, clipped
+# to the splitter. The image is read from Finder.rsrc at each draw, as
+# the toolbar's are. Tiger doesn't redraw the splitter when its window is
+# activated or deactivated, so on its first draw each splitter gets a Carbon
+# event handler for those (it marks the view for redrawing), and a control
+# property ('Aqfn' 'hdr ') saying it has one.
+TIGER_HEADER_STUBS = ['_CGContextSetRGBFillColor', '_CGContextFillRect', '_IsControlActive', '_GetResource',
+                      '_GetHandleSize', '_CGDataProviderCreateWithData', '_CGImageCreateWithPNGDataProvider',
+                      '_CGDataProviderRelease', '_CGContextSaveGState', '_CGContextClipToRect',
+                      '_HIViewDrawCGImage', '_CGContextRestoreGState', '_CGImageRelease',
+                      '_GetControlProperty', '_SetControlProperty', '_GetControlEventTarget',
+                      '_InstallEventHandler', '_HIViewSetNeedsDisplay']
+
+
+def build_tiger_header(cave, stubs, rsrc_id, rows, width, line=TOPBAR_LINE):
+    """cave: where the routine goes (constants first). Entry 'hdivider'
+    (view r3, ctx r4) stands in for the splitter Draw's call of sub_3f304.
+    Also returns 'hmargin', the address of the float rows - 1 (the sidebar's
+    top margin, loaded by the splitter's init), and 'hmone', of -1.0 (the
+    file pane's). Returns (bytes, entries)."""
+    consts = struct.pack('>6f', 1.0, line / 255.0, float(rows), float(width), 0.0, float(rows - 1))
+    consts += struct.pack('>4I', _ostype('cntl'), 9, _ostype('cntl'), 10)    # kEventControlActivate, Deactivate
+    consts += struct.pack('>f', -1.0)
+    ONE, LINE, ROWS, WIDTH, ZERO, MARGIN, SPECS, MONE = 0, 4, 8, 12, 16, 20, 24, 40
+    a = Asm(cave)
+    a.data(consts)
+    hi, lo = (cave + 0x8000) >> 16, cave & 0xffff
+    K = 31
+    def lis_ori(r, v):
+        a.lis(r, v >> 16); a.emit(d_form(24, r, r, v & 0xffff))
+    # handler(callRef, event, view): redraw the view; let others see the event
+    a.label('hhandler')
+    a.mflr(0)
+    a.stw(0, 8, 1)
+    a.stwu(1, -0x40, 1)
+    a.mr(3, 5)
+    a.li(4, 1)
+    a.bl(stubs['_HIViewSetNeedsDisplay'])
+    a.li(3, EVENT_NOT_HANDLED)
+    a.lwz(0, 0x48, 1)
+    a.addi(1, 1, 0x40)
+    a.mtlr(0)
+    a.blr()
+    handler = a.labels['hhandler']
+    a.label('hdivider')
+    a.mflr(0)
+    _stmw(a, 26, -24, 1)
+    a.stw(0, 8, 1)
+    a.stwu(1, -0xa0, 1)
+    a.lis(K, hi)
+    a.addi(K, K, lo)
+    a.mr(27, 3)                             # view
+    a.mr(28, 4)                             # ctx
+    a.lwz(3, TIGER_HIVIEW, 27)              # once per view: the (de)activation handler
+    lis_ori(4, _ostype('Aqfn'))
+    lis_ori(5, _ostype('hdr '))
+    a.li(6, 4)
+    a.addi(7, 1, 0x78)
+    a.addi(8, 1, 0x7c)
+    a.bl(stubs['_GetControlProperty'])
+    a.cmpwi(3, 0)
+    a.beq('has')
+    a.lwz(3, TIGER_HIVIEW, 27)
+    a.bl(stubs['_GetControlEventTarget'])
+    a.lis(4, (handler + 0x8000) >> 16); a.addi(4, 4, handler & 0xffff)
+    a.li(5, 2)
+    a.addi(6, K, SPECS)
+    a.lwz(7, TIGER_HIVIEW, 27)
+    a.li(8, 0)
+    a.bl(stubs['_InstallEventHandler'])
+    a.li(0, 1)
+    a.stw(0, 0x7c, 1)
+    a.lwz(3, TIGER_HIVIEW, 27)
+    lis_ori(4, _ostype('Aqfn'))
+    lis_ori(5, _ostype('hdr '))
+    a.li(6, 4)
+    a.addi(7, 1, 0x7c)
+    a.bl(stubs['_SetControlProperty'])
+    a.label('has')
+    a.mr(3, 27)
+    a.mr(4, 28)
+    a.bl(TIGER_BAR_FILL)                    # the splitter's own background
+    a.addi(9, 27, TIGER_DIVIDER_RECT)       # divider rect {x, y, w, h} at 0x40
+    a.lswi(4, 9, 16)
+    a.addi(29, 1, 0x40)
+    a.stswi(4, 29, 16)
+    # the line: {x + w - 1, y, 1, h}
+    a.lfs(0, 0x40, 1); a.lfs(13, 0x48, 1); a.fadds(0, 0, 13); a.lfs(13, ONE, K); a.fsubs(0, 0, 13)
+    a.stfs(0, 0x50, 1)                      # (0x50: the line's x, the header's width)
+    a.lfs(0, 0x44, 1); a.stfs(0, 0x54, 1)
+    a.stfs(13, 0x58, 1)
+    a.lfs(0, 0x4c, 1); a.stfs(0, 0x5c, 1)
+    a.mr(3, 28)
+    a.lfs(1, LINE, K); a.fmr(2, 1); a.fmr(3, 1); a.lfs(4, ONE, K)
+    a.bl(stubs['_CGContextSetRGBFillColor'])
+    a.mr(3, 28)
+    a.addi(9, 1, 0x50)
+    a.lswi(4, 9, 16)
+    a.bl(stubs['_CGContextFillRect'])
+    # collapsed (the divider at the left edge): no header
+    a.lfs(0, 0x40, 1); a.lfs(13, ZERO, K); a.fcmpu(0, 13)
+    a.ble('done')
+    # the header: clip {0, y, x + w - 1, rows - 1}, image a row up {0, y - 1, width, rows}
+    a.lfs(0, 0x50, 1); a.stfs(0, 0x68, 1)
+    a.lfs(0, ZERO, K); a.stfs(0, 0x60, 1)
+    a.lfs(0, 0x44, 1); a.stfs(0, 0x64, 1)
+    a.lfs(0, MARGIN, K); a.stfs(0, 0x6c, 1)
+    a.lwz(3, TIGER_HIVIEW, 27)
+    a.bl(stubs['_IsControlActive'])
+    _clrlwi24(a, 3, 3)
+    a.li(4, rsrc_id + 1)                    # inactive: the next id
+    a.cmpwi(3, 0)
+    a.beq('picked')
+    a.li(4, rsrc_id)
+    a.label('picked')
+    a.lis(3, _ostype('PNG ') >> 16); a.emit(d_form(24, 3, 3, _ostype('PNG ') & 0xffff))
+    a.bl(stubs['_GetResource'])
+    a.cmpwi(3, 0); a.beq('done')
+    a.mr(30, 3)
+    a.bl(stubs['_GetHandleSize'])
+    a.mr(5, 3)
+    a.lwz(4, 0, 30)
+    a.li(3, 0); a.li(6, 0)
+    a.bl(stubs['_CGDataProviderCreateWithData'])
+    a.cmpwi(3, 0); a.beq('done')
+    a.mr(30, 3)
+    a.li(4, 0); a.li(5, 0); a.li(6, 0)
+    a.bl(stubs['_CGImageCreateWithPNGDataProvider'])
+    a.mr(26, 3)
+    a.mr(3, 30)
+    a.bl(stubs['_CGDataProviderRelease'])
+    a.cmpwi(26, 0); a.beq('done')
+    a.mr(3, 28)
+    a.bl(stubs['_CGContextSaveGState'])
+    a.mr(3, 28)
+    a.addi(9, 1, 0x60)
+    a.lswi(4, 9, 16)
+    a.bl(stubs['_CGContextClipToRect'])
+    a.lfs(0, WIDTH, K); a.stfs(0, 0x68, 1)
+    a.lfs(0, ROWS, K); a.stfs(0, 0x6c, 1)
+    a.lfs(0, 0x64, 1); a.lfs(13, ONE, K); a.fsubs(0, 0, 13); a.stfs(0, 0x64, 1)
+    a.mr(3, 28)
+    a.addi(4, 1, 0x60)
+    a.mr(5, 26)
+    a.bl(stubs['_HIViewDrawCGImage'])
+    a.mr(3, 28)
+    a.bl(stubs['_CGContextRestoreGState'])
+    a.mr(3, 26)
+    a.bl(stubs['_CGImageRelease'])
+    a.label('done')
+    a.lwz(0, 0xa8, 1)
+    a.addi(1, 1, 0xa0)
+    a.mtlr(0)
+    _lmw(a, 26, -24, 1)
+    a.blr()
+    return a.assemble(), {'hdivider': a.labels['hdivider'], 'hmargin': cave + MARGIN, 'hmone': cave + MONE}
+
+
+# --- 'well' on Tiger 10.4.11 (patch.py TIGER_WELL_PATCHES): the sidebar as
+# a white inset list on the window's pinstripes, framed like an Aqua list box,
+# as on Panther (build_well_frame). The splitter's sidebar margins are the
+# well's margin (left, top, bottom) and 1 (right: the frame's line), the file
+# pane has none, and the divider is the margin wide. The splitter's Draw calls
+# build_tiger_well's routine instead of its background + DrawDivider: its
+# background, the strip left of the files striped (build_tiger_stripes'
+# stripes, by window row), the divider's line (its last column) and, unless
+# the sidebar is collapsed, the list box's frame 1 px around the sidebar.
+TIGER_WELL_STUBS = TIGER_STRIPES_STUBS + ['_HIViewGetWindow', '_SetWindowProperty', '_HIViewConvertRect',
+                                         '_HIViewGetRoot', '_HIViewSetNeedsDisplayInRect']
+TIGER_OUTLINE_FN = (0x3f448, 0x3f660)  # sub_3f448, a pane's outline: called only from the splitter Draw's two calls 'gap' nops
+TIGER_DIVUPDATE_STUBS = ['_RemoveEventLoopTimer', '_GetWindowProperty', '_HIViewSetNeedsDisplay', '_CFRelease',
+                         '_HIViewGetWindow', '_SetWindowProperty', '_CFRetain', '_GetMainEventLoop',
+                         '_InstallEventLoopTimer']
+TIGER_DIVX_SIZE = 8                    # the window's 'Aqfn' 'divx' property: {divider x, its line's x}
+                                       # ('Aqfn' 'barv': the status bar's HIView, build_tiger_well_edge)
+
+
+def build_tiger_divupdate(addr, stubs):
+    """For the well's top edge on Tiger (build_tiger_well_edge), in the
+    outline routine's dead code (TIGER_OUTLINE_FN):
+      divupdate(splitter r3), from the splitter's Draw: the window's 'Aqfn'
+        'divx' property = {x, x + w - 1} of its divider rect; then a timer,
+        firing right after this draw, marks the window's status bar (its
+        'Aqfn' 'barv' property, which the bar's edge routine sets) for
+        redrawing: a redraw asked for during a draw is lost. The timer keeps
+        the window retained until it fires.
+      fired(timer r3, window r4): the timer's proc.
+    Returns (bytes, {'divupdate'})."""
+    a = Asm(addr)
+    a.data(struct.pack('>f', 1.0))
+    ONE = addr
+    def creator_tag(size, tag='divx'):
+        a.lis(4, _ostype('Aqfn') >> 16); a.emit(d_form(24, 4, 4, _ostype('Aqfn') & 0xffff))
+        a.lis(5, _ostype(tag) >> 16); a.emit(d_form(24, 5, 5, _ostype(tag) & 0xffff))
+        a.li(6, size)
+    a.label('fired')                       # fired(timer, window): frame 0x70, r30/r31 at 0x68
+    a.mflr(0)
+    _stmw(a, 30, -8, 1)
+    a.stw(0, 8, 1)
+    a.stwu(1, -0x70, 1)
+    a.mr(31, 4)
+    a.bl(stubs['_RemoveEventLoopTimer'])
+    a.mr(3, 31)
+    creator_tag(4, 'barv')
+    a.li(7, 0)
+    a.addi(8, 1, 0x40)
+    a.bl(stubs['_GetWindowProperty'])
+    a.cmpwi(3, 0)
+    a.bne('fdone')
+    a.lwz(3, 0x40, 1)
+    a.li(4, 1)
+    a.bl(stubs['_HIViewSetNeedsDisplay'])
+    a.label('fdone')
+    a.mr(3, 31)
+    a.bl(stubs['_CFRelease'])
+    a.b('out')
+    a.label('divupdate')
+    a.mflr(0)
+    _stmw(a, 30, -8, 1)
+    a.stw(0, 8, 1)
+    a.stwu(1, -0x70, 1)
+    a.mr(31, 3)
+    a.lis(9, (ONE + 0x8000) >> 16)
+    a.lfs(12, ONE & 0xffff, 9)
+    a.lfs(0, TIGER_DIVIDER_RECT, 31); a.stfs(0, 0x40, 1)                # {x, x + w - 1}
+    a.lfs(13, TIGER_DIVIDER_RECT + 8, 31); a.fadds(13, 0, 13); a.fsubs(13, 13, 12); a.stfs(13, 0x44, 1)
+    a.lwz(3, TIGER_HIVIEW, 31)
+    a.bl(stubs['_HIViewGetWindow'])
+    a.mr(30, 3)
+    creator_tag(TIGER_DIVX_SIZE)
+    a.addi(7, 1, 0x40)
+    a.bl(stubs['_SetWindowProperty'])
+    a.mr(3, 30)
+    a.bl(stubs['_CFRetain'])
+    a.bl(stubs['_GetMainEventLoop'])
+    a.lis(9, (ONE + 0x8000) >> 16)
+    a.lfs(1, ONE & 0xffff, 9); a.fsubs(1, 1, 1); a.fmr(2, 1)           # delay 0, interval 0 (doubles)
+    # (the Darwin PPC ABI: each double also takes two GPRs, r4..r7 here)
+    a.lis(8, 0); fix = len(a.words) - 1; a.addi(8, 8, 0)                # the proc: fired
+    a.mr(9, 30)                            # its data: the window
+    a.addi(10, 1, 0x60)                    # (the timer, unused: its proc gets it)
+    a.bl(stubs['_InstallEventLoopTimer'])
+    a.label('out')
+    a.lwz(0, 0x78, 1)
+    a.addi(1, 1, 0x70)
+    a.mtlr(0)
+    _lmw(a, 30, -8, 1)
+    a.blr()
+    fired = a.labels['fired']
+    a.words[fix] = d_form(15, 8, 0, (fired + 0x8000) >> 16)
+    a.words[fix + 1] = d_form(14, 8, 8, fired & 0xffff)
+    return a.assemble(), {'divupdate': a.labels['divupdate']}
+
+
+def build_tiger_well(cave, stubs, margin, divupdate, line=TOPBAR_LINE, top=WELL_TOP, sides=WELL_SIDES):
+    """cave: where the routines go: build_tiger_stripes' (for its stripes
+    routine), then 'wdivider' (view r3, ctx r4), standing in for the splitter
+    Draw's call of sub_3f304, and its constants, among them 'wmargin' (the
+    float margin, the sidebar's margins and the divider's width), 'wone'
+    (1.0), 'wzero' (0.0) and 'wmone' (-1.0, the file pane's top margin).
+    Returns (bytes, entries)."""
+    scode, sent = build_tiger_stripes(cave, stubs, only_stripes=True)
+    base = (cave + len(scode) + 15) & ~15
+    consts = struct.pack('>7f', 1.0, float(margin), 0.0, line / 255.0, sides / 255.0, top / 255.0, -1.0)
+    ONE, MARGIN, ZERO, LINE, SIDES, TOP, MONE = 0, 4, 8, 12, 16, 20, 24
+    a = Asm(base)
+    a.data(consts)
+    hi, lo = (base + 0x8000) >> 16, base & 0xffff
+    K = 31
+    def fill(rect_off, gray):             # (the rect is always at 0x50)
+        assert rect_off == 0x50
+        a.lfs(1, gray, K)
+        a.bl('wfill')
+    # wfill(f1 gray): fill {0x50} with it, on wdivider's frame (LR at 0x80:
+    # its locals end at 0x88, where the saved r26..r31 start)
+    a.label('wfill')
+    a.mflr(0)
+    a.stw(0, 0x80, 1)
+    a.mr(3, 28)
+    a.fmr(2, 1); a.fmr(3, 1); a.lfs(4, ONE, K)
+    a.bl(stubs['_CGContextSetRGBFillColor'])
+    a.mr(3, 28)
+    a.addi(9, 1, 0x50)
+    a.lswi(4, 9, 16)
+    a.bl(stubs['_CGContextFillRect'])
+    a.lwz(0, 0x80, 1)
+    a.mtlr(0)
+    a.blr()
+    a.label('wdivider')
+    a.mflr(0)
+    _stmw(a, 26, -24, 1)
+    a.stw(0, 8, 1)
+    a.stwu(1, -0xa0, 1)
+    a.lis(K, hi)
+    a.addi(K, K, lo)
+    a.mr(27, 3)                             # view
+    a.mr(28, 4)                             # ctx
+    a.bl(TIGER_BAR_FILL)                    # the splitter's own background
+    a.addi(9, 27, TIGER_DIVIDER_RECT)       # divider rect {x, y, w, h} at 0x40
+    a.lswi(4, 9, 16)
+    a.addi(29, 1, 0x40)
+    a.stswi(4, 29, 16)
+    # the strip left of the files, striped: {0, y, x + w, h}
+    a.lfs(0, ZERO, K); a.stfs(0, 0x50, 1)
+    a.lfs(0, 0x44, 1); a.stfs(0, 0x54, 1)
+    a.lfs(0, 0x40, 1); a.lfs(13, 0x48, 1); a.fadds(0, 0, 13); a.stfs(0, 0x58, 1)
+    a.lfs(0, 0x4c, 1); a.stfs(0, 0x5c, 1)
+    a.mr(3, 28)
+    a.addi(4, 1, 0x50)
+    a.mr(5, 27)
+    a.bl(sent['stripes_fn'])
+    # the line: {x + w - 1, y, 1, h}
+    a.lfs(0, 0x58, 1); a.lfs(13, ONE, K); a.fsubs(0, 0, 13); a.stfs(0, 0x50, 1)
+    a.stfs(13, 0x58, 1)
+    fill(0x50, LINE)
+    # the divider for the status bar's edge (build_tiger_divupdate)
+    a.mr(3, 27)
+    a.bl(divupdate)
+    # collapsed (the divider at the left edge): no frame
+    a.lfs(0, 0x40, 1); a.lfs(13, ZERO, K); a.fcmpu(0, 13)
+    a.ble('wdone')
+    # the frame, 1 px around the sidebar {m, y, x - 1 - m, h - m}: o = {m - 1,
+    # y - 1, x - m + 1, h - m + 2} at 0x60 (its top row, the status bar's
+    # last, is the bar's top edge: clipped here, build_tiger_edge draws it)
+    a.lfs(0, MARGIN, K); a.lfs(13, ONE, K); a.fsubs(0, 0, 13); a.stfs(0, 0x60, 1)      # m - 1
+    a.lfs(0, 0x44, 1); a.fsubs(0, 0, 13); a.stfs(0, 0x64, 1)                           # y - 1
+    a.lfs(0, 0x40, 1); a.lfs(13, 0x60, 1); a.fsubs(0, 0, 13); a.stfs(0, 0x68, 1)      # x - (m - 1)
+    a.lfs(0, 0x4c, 1); a.fsubs(0, 0, 13); a.lfs(13, ONE, K); a.fadds(0, 0, 13); a.fadds(0, 0, 13)
+    a.fadds(0, 0, 13); a.stfs(0, 0x6c, 1)                                               # h - (m - 1) + 2
+    # left {ox, oy, 1, oh}, right {ox + ow - 1, oy, 1, oh}
+    for k, src in enumerate((0x60, 0x64, 0x68, 0x6c)):
+        a.lfs(0, src, 1); a.stfs(0, 0x50 + 4 * k, 1)
+    a.lfs(0, ONE, K); a.stfs(0, 0x58, 1)
+    fill(0x50, SIDES)
+    a.lfs(0, 0x60, 1); a.lfs(13, 0x68, 1); a.fadds(0, 0, 13); a.lfs(13, ONE, K); a.fsubs(0, 0, 13)
+    a.stfs(0, 0x50, 1)
+    fill(0x50, SIDES)
+    # bottom {ox, oy + oh - 1, ow, 1} (HIView: y down)
+    a.lfs(0, 0x60, 1); a.stfs(0, 0x50, 1)
+    a.lfs(0, 0x64, 1); a.lfs(13, 0x6c, 1); a.fadds(0, 0, 13); a.lfs(13, ONE, K); a.fsubs(0, 0, 13)
+    a.stfs(0, 0x54, 1)
+    a.lfs(0, 0x68, 1); a.stfs(0, 0x58, 1)
+    a.lfs(0, ONE, K); a.stfs(0, 0x5c, 1)
+    fill(0x50, SIDES)
+    a.label('wdone')
+    a.lwz(0, 0xa8, 1)
+    a.addi(1, 1, 0xa0)
+    a.mtlr(0)
+    _lmw(a, 26, -24, 1)
+    a.blr()
+    code = scode + bytes(base - cave - len(scode)) + a.assemble()
+    return code, {'wdivider': a.labels['wdivider'], 'wmargin': base + MARGIN, 'wone': base + ONE,
+                  'wzero': base + ZERO, 'wmone': base + MONE}
+
+
+# The top edge of 'header' and 'well' on Tiger (cave.EDGE_*): the status
+# bar's Draw ends in a fill of its last row in its line gray; that fill goes
+# to build_tiger_edge's routine instead: the row in the edge's gray (the list
+# header's top line, or the well's frame top), and, for the well, its first
+# margin - 1 columns in the bar's pinstripe there (left of the well's frame).
+# The file pane and the sidebar start under it, as on Panther (Tiger's
+# splitter can't draw outside itself: no CGContextResetClip there).
+TIGER_EDGE_STUBS = ['_CGContextSetRGBFillColor', '_CGContextFillRect']
+
+
+TIGER_BAR_STASH = 0x3bd540            # __DATA's zero-fill tail, past __common: the status bar view (build_tiger_bar)
+
+
+def build_tiger_well_edge(cave, stubs, margin, top=WELL_TOP, stripe=WELL_BAR_STRIPE, stash=TIGER_BAR_STASH):
+    """The well's edge(ctx r3, rect r4..r7 by value: the bar's last row): the
+    row in the bar's pinstripe gray; over the sidebar, from its frame's left
+    (margin - 1) to the divider, its frame's top line, and from the divider's
+    line on, the files' top edge, both `top` gray. The divider is the
+    splitter's window property (build_tiger_well), the window the status
+    bar's, whose view the bar routine left at `stash` earlier in this draw;
+    with no property yet, the line runs from the frame's left on. Returns
+    (bytes, {'edge': entry})."""
+    consts = struct.pack('>4f', 1.0, top / 255.0, stripe / 255.0, float(margin - 1))
+    ONE, TOP, STRIPE, MM1 = 0, 4, 8, 12
+    a = Asm(cave)
+    a.data(consts)
+    hi, lo = (cave + 0x8000) >> 16, cave & 0xffff
+    K = 31
+    a.label('fill')                         # fill(f1 gray, r29 rect), on edge's frame (0x90: LR
+    a.mflr(0)                               # at 0x78, the saved r29..r31 at 0x84..0x8f)
+    a.stw(0, 0x78, 1)
+    a.mr(3, 30)
+    a.fmr(2, 1); a.fmr(3, 1); a.lfs(4, ONE, K)
+    a.bl(stubs['_CGContextSetRGBFillColor'])
+    a.mr(3, 30)
+    a.lswi(4, 29, 16)
+    a.bl(stubs['_CGContextFillRect'])
+    a.lwz(0, 0x78, 1)
+    a.mtlr(0)
+    a.blr()
+    a.label('edge')
+    a.mflr(0)
+    _stmw(a, 29, -12, 1)
+    a.stw(0, 8, 1)
+    a.stwu(1, -0x90, 1)
+    a.lis(K, hi)
+    a.addi(K, K, lo)
+    a.mr(30, 3)
+    a.addi(29, 1, 0x50)                     # the row at 0x50 (for the files' edge) and 0x40
+    a.stswi(4, 29, 16)
+    a.addi(29, 1, 0x40)
+    a.stswi(4, 29, 16)
+    a.lfs(0, MM1, K); a.stfs(0, 0x60, 1); a.stfs(0, 0x64, 1)   # the divider {x, line x, ...}: none yet
+    a.lis(9, (stash + 0x8000) >> 16)       # (set: the bar routine ran earlier in this draw)
+    a.lwz(3, stash & 0xffff, 9)
+    a.lwz(3, TIGER_HIVIEW, 3)
+    a.stw(3, 0x70, 1)
+    a.bl(stubs['_HIViewGetWindow'])
+    a.stw(3, 0x7c, 1)                       # this window's status bar, for build_tiger_divupdate
+    a.lis(4, _ostype('Aqfn') >> 16); a.emit(d_form(24, 4, 4, _ostype('Aqfn') & 0xffff))
+    a.lis(5, _ostype('barv') >> 16); a.emit(d_form(24, 5, 5, _ostype('barv') & 0xffff))
+    a.li(6, 4)
+    a.addi(7, 1, 0x70)
+    a.bl(stubs['_SetWindowProperty'])
+    a.lwz(3, 0x7c, 1)
+    a.lis(4, _ostype('Aqfn') >> 16); a.emit(d_form(24, 4, 4, _ostype('Aqfn') & 0xffff))
+    a.lis(5, _ostype('divx') >> 16); a.emit(d_form(24, 5, 5, _ostype('divx') & 0xffff))
+    a.li(6, TIGER_DIVX_SIZE)
+    a.li(7, 0)
+    a.addi(8, 1, 0x60)
+    a.bl(stubs['_GetWindowProperty'])
+    a.lfs(1, STRIPE, K)
+    a.bl('fill')                            # the row, pinstripe gray
+    a.lfs(0, 0x60, 1); a.lfs(13, MM1, K); a.fcmpu(0, 13)
+    a.ble('files')
+    a.fsubs(0, 0, 13); a.stfs(0, 0x48, 1)  # the frame's top: {m - 1, y, x - (m - 1), 1}
+    a.stfs(13, 0x40, 1)
+    a.lfs(1, TOP, K)
+    a.bl('fill')
+    a.label('files')                        # the files' top edge: {line x, y, row w, 1}
+    a.addi(29, 1, 0x50)
+    a.lfs(0, 0x64, 1); a.stfs(0, 0x50, 1)
+    a.lfs(1, TOP, K)
+    a.bl('fill')
+    a.lwz(0, 0x98, 1)
+    a.addi(1, 1, 0x90)
+    a.mtlr(0)
+    _lmw(a, 29, -12, 1)
+    a.blr()
+    return a.assemble(), {'edge': a.labels['edge']}
+
+
+TIGER_WELL_EDGE_STUBS = ['_CGContextSetRGBFillColor', '_CGContextFillRect', '_HIViewGetWindow', '_GetWindowProperty',
+                         '_SetWindowProperty']
+
+
+def build_tiger_edge(cave, stubs, gray, stripe_cols=0, stripe=WELL_BAR_STRIPE):
+    """edge(ctx r3, rect r4..r7 by value: the bar's last row). Returns
+    (bytes, {'edge': entry})."""
+    consts = struct.pack('>4f', 1.0, gray / 255.0, stripe / 255.0, float(stripe_cols))
+    ONE, GRAY, STRIPE, COLS = 0, 4, 8, 12
+    a = Asm(cave)
+    a.data(consts)
+    hi, lo = (cave + 0x8000) >> 16, cave & 0xffff
+    a.label('edge')
+    a.mflr(0)
+    _stmw(a, 30, -8, 1)
+    a.stw(0, 8, 1)
+    a.stwu(1, -0x60, 1)
+    a.lis(31, hi)
+    a.addi(31, 31, lo)
+    a.mr(30, 3)
+    a.addi(9, 1, 0x40)
+    a.stswi(4, 9, 16)
+    for g, cols in ((GRAY, False), (STRIPE, True)):
+        if cols and not stripe_cols:
+            continue
+        if cols:
+            a.lfs(0, COLS, 31); a.stfs(0, 0x48, 1)
+        a.mr(3, 30)
+        a.lfs(1, g, 31); a.fmr(2, 1); a.fmr(3, 1); a.lfs(4, ONE, 31)
+        a.bl(stubs['_CGContextSetRGBFillColor'])
+        a.mr(3, 30)
+        a.addi(9, 1, 0x40)
+        a.lswi(4, 9, 16)
+        a.bl(stubs['_CGContextFillRect'])
+    a.lwz(0, 0x68, 1)
+    a.addi(1, 1, 0x60)
+    a.mtlr(0)
+    _lmw(a, 30, -8, 1)
+    a.blr()
+    return a.assemble(), {'edge': a.labels['edge']}
 
 
 # Jaguar's toolbar buttons on Tiger (patch.py 'toolbar', images: toolbar.py
