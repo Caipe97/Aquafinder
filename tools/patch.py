@@ -158,10 +158,25 @@ VIEW_IDS_NEW = (8600, 8606, 8612)
 VIEW_IMAGES = 18
 VIEW_ANCHORS = [VIEW_LOADER_LAST, VIEW_LOADER_LANDING, VIEW_LOADER_DONE, VIEW_DRAW_IDS]
 SET_NAMES = ['nometal', 'square', 'statusbar', 'gap', 'shadow', 'softlines', 'slimbar', 'topbar', 'toolbar', 'barupdate']
-# 'stripes', off by default (an option of the finder part): a pinstriped
-# sidebar with a slim, shadowed divider: Panther 10.3.9 (STRIPES_*) and Tiger
-# 10.4.11 (TIGER_STRIPES_PATCHES).
-OPTIONAL_SET_NAMES = ['stripes']
+# The sidebar styles, off by default (options of the finder part, one at a
+# time; none is the plain sidebar):
+#   'stripes'  a pinstriped sidebar with a slim, shadowed divider: Panther
+#              10.3.9 (STRIPES_*) and Tiger 10.4.11 (TIGER_STRIPES_PATCHES)
+#   'header'   a white sidebar under an Aqua list header ("Places", as the file
+#              list's), and a 1 px line for a divider (HEADER_*)
+#   'well'     the sidebar as a white inset list on the window's pinstripes,
+#              framed like an Aqua list box, and a 1 px line by the files (WELL_*)
+# 'header' and 'well' build on 'stripes'' layout (no margin around the file
+# pane, the divider's image centered); 'header' also on its 7 px divider.
+STYLE_SET_NAMES = ['stripes', 'header', 'well']
+OPTIONAL_SET_NAMES = STYLE_SET_NAMES
+
+
+def style_of(names):
+    """The sidebar style among `names` (None: the plain sidebar)."""
+    st = [n for n in names if n in STYLE_SET_NAMES]
+    assert len(st) <= 1, 'one sidebar style at a time: %s' % ', '.join(st)
+    return st[0] if st else None
 
 # Tiger 10.4.11 (8S165). Its Finder was largely rewritten (C++, HIView), so
 # the 10.3.9 signatures don't find these: they are its own addresses, used
@@ -274,6 +289,44 @@ TIGER_STRIPES_OVERRIDES = {
     0x2d924: None,                                  # divider width: the stock 7.0
     0x3f24c: ('bl_cave', 'sdivider'),               # the stripes divider
 }
+# 'header' on Tiger (cave.build_tiger_header): the sidebar's margins in the
+# splitter go but the top one, the header's rows - 1 (its first row is the
+# status bar's last, the top edge below); the file pane's top margin is -1
+# (its own first row hidden under that edge) and its left one goes; the
+# divider keeps its stock 7 px, drawn as a 1 px line, with the header.
+# The status bar's last row, the top edge of 'header' and 'well' (cave.EDGE_*,
+# cave.build_tiger_edge): its line fill goes to the edge routine.
+TIGER_EDGE_FILL = 0x42ef0              # status bar draw: bl CGContextFillRect (its bottom line)
+TIGER_HEADER_PATCHES = [
+    ('header', 0x2d3f4, 0xc022d434, 0xc022d41c, 'splitter init: sidebar margins 1.0 -> 0.0'),
+    ('header', 0x2d400, 0xc082d454, 0xc082d41c, 'splitter init: sidebar bottom margin 2.0 -> 0.0'),
+    ('header', 0x2d408, 0xfc600890, ('lfs_cave_reg', 3, 'hmargin'), 'splitter init: sidebar top margin -> header rows - 1 (lfs f3)'),
+    ('header', 0x2d418, 0xc022d434, 0xc022d41c, 'splitter init: file pane left (and top) margins 1.0 -> 0.0'),
+    ('header', 0x2d42c, 0xfc600890, ('lfs_cave_reg', 3, 'hmone'), 'splitter init: file pane top margin -1.0 (under the top edge)'),
+    ('header', TIGER_EDGE_FILL, 0x481b04d1, ('bl_cave', 'edge'), 'status bar draw: its bottom line -> bl <edge routine>'),
+]
+TIGER_HEADER_OVERRIDES = {
+    0x2d924: None,                                  # divider width: the stock 7.0
+    0x3f24c: ('bl_cave', 'hdivider'),               # the line and the header
+}
+# 'well' on Tiger (cave.build_tiger_well): the sidebar's margins in the
+# splitter are the well's (left, top, bottom; right 1, the frame's line), the
+# file pane's go; the divider is the margin wide.
+TIGER_WELL_PATCHES = [
+    ('well', 0x2d3f4, 0xc022d434, ('lfs_cave_reg', 1, 'wmargin'), 'splitter init: sidebar margins 1.0 -> the margin (left)'),
+    ('well', 0x2d400, 0xc082d454, ('lfs_cave_reg', 4, 'wmargin'), 'splitter init: sidebar bottom margin 2.0 -> the margin'),
+    ('well', 0x2d404, 0xfc400890, 0xc042d434, 'splitter init: sidebar right margin -> 1.0 (lfs f2,1.0)'),
+    ('well', 0x2d408, 0xfc600890, 0xc062d41c, 'splitter init: sidebar top margin -> 0.0 (the frame top is the top edge)'),
+    ('well', 0x2d418, 0xc022d434, 0xc022d41c, 'splitter init: file pane left margin 1.0 -> 0.0'),
+    ('well', 0x2d42c, 0xfc600890, ('lfs_cave_reg', 3, 'wmone'), 'splitter init: file pane top margin -1.0 (under the top edge)'),
+    ('well', TIGER_EDGE_FILL, 0x481b04d1, ('bl_cave', 'edge'), 'status bar draw: its bottom line -> bl <edge routine>'),
+]
+TIGER_WELL_OVERRIDES = {
+    0x2d924: ('lfs_cave_reg', 1, 'wmargin'),        # divider width: the margin
+    0x3f24c: ('bl_cave', 'wdivider'),               # stripes, line and frame
+}
+TIGER_STYLE_OVERRIDES = {'stripes': TIGER_STRIPES_OVERRIDES, 'header': TIGER_HEADER_OVERRIDES,
+                         'well': TIGER_WELL_OVERRIDES}
 
 
 def is_tiger(m):
@@ -297,14 +350,41 @@ def place_tiger_cave(m, data, names, quiet):
     last = max(x['addr'] + x['size'] for x in m.sections if x['seg'] == '__TEXT')
     seg = [x for x in m.segments if x['name'] == '__TEXT'][0]
     end = seg['vmaddr'] + seg['filesize']
-    stubs = {nm: stub_addr(m, nm) for nm in cave.TIGER_BAR_STUBS + cave.TIGER_STRIPES_STUBS + cave.TIGER_TOOLBAR_STUBS}
+    stubs = {nm: stub_addr(m, nm) for nm in cave.TIGER_BAR_STUBS + cave.TIGER_STRIPES_STUBS + cave.TIGER_TOOLBAR_STUBS
+             + cave.TIGER_HEADER_STUBS + cave.TIGER_EDGE_STUBS + cave.TIGER_WELL_STUBS + cave.TIGER_WELL_EDGE_STUBS}
+    import header
     caddr, entries = (last + 15) & ~15, {}
-    for key, setname, build in (('bar', 'shadow', cave.build_tiger_bar),
+    build_header = lambda c, st: cave.build_tiger_header(c, st, header.HEADER_ID, header.HEIGHT, header.HEADER_WIDTH)
+    if 'well' in names:                    # its divider updates, in the outline routine's dead code
+        ohead, oend = cave.TIGER_OUTLINE_FN
+        w = lambda a: struct.unpack_from('>I', data, m.addr2off(a))[0]
+        assert w(ohead) == 0x7c0802a6 and w(ohead + 4) == 0xbf01ffd8 and w(oend) == 0x7c0802a6, 'pane outline routine'
+        code, ent = cave.build_tiger_divupdate(ohead, {nm: stub_addr(m, nm) for nm in cave.TIGER_DIVUPDATE_STUBS})
+        assert len(code) <= oend - ohead
+        data[m.addr2off(ohead):m.addr2off(ohead) + len(code)] = code
+        for k in range(ohead + len(code), oend, 4):
+            struct.pack_into('>I', data, m.addr2off(k), 0x60000000)
+        entries.update(ent)
+        if not quiet:
+            print('well      %08x file+%06x  %d bytes (divider updates) in the pane outline routine, %d free' % (
+                ohead, m.addr2off(ohead), len(code), oend - ohead - len(code)))
+    build_well = lambda c, st: cave.build_tiger_well(c, st, WELL_MARGIN, entries.get('divupdate'))
+    style = style_of(names)
+    if style == 'well':                    # the well's edge reads the divider (cave.build_tiger_well_edge)
+        assert data_tail_free(m, cave.TIGER_BAR_STASH, 4), 'no room for the status bar stash'
+        build_edge = lambda c, st: cave.build_tiger_well_edge(c, st, WELL_MARGIN)
+    else:
+        build_edge = lambda c, st: cave.build_tiger_edge(c, st, cave.EDGE_HEADER)
+    build_bar = lambda c, st: cave.build_tiger_bar(c, st, stash=cave.TIGER_BAR_STASH if style == 'well' else None)
+    for key, setname, build in (('bar', 'shadow', build_bar),
                                 ('divider', 'gap', cave.build_tiger_divider),
                                 ('line', 'softlines', cave.build_tiger_line),
                                 ('stripes', 'stripes', cave.build_tiger_stripes),
+                                ('header', 'header', build_header),
+                                ('well', 'well', build_well),
+                                ('edgecave', style if style in ('header', 'well') else None, build_edge),
                                 ('toolbar', 'toolbar', cave.build_tiger_toolbar)):
-        if setname not in names or (key == 'divider' and 'stripes' in names):
+        if setname not in names or (key == 'divider' and style_of(names)):
             continue
         code, entries[key], *data_addr = build(caddr, stubs)
         if isinstance(entries[key], dict):
@@ -327,21 +407,23 @@ def place_tiger_cave(m, data, names, quiet):
 
 def apply_tiger(m, path_out, names, quiet):
     data = bytearray(m.data)
-    stripes = 'stripes' in names
-    if stripes:
+    style = style_of(names)
+    if style:
+        assert all(n in names for n in ('gap', 'topbar', 'shadow')), "'%s' needs 'gap', 'topbar' and 'shadow'" % style
+    if style == 'stripes':
         import cave
-        assert all(n in names for n in ('gap', 'topbar', 'shadow')), "'stripes' needs 'gap', 'topbar' and 'shadow'"
         vt = m.addr2off(cave.TIGER_SIDEBAR_VTABLE + 0xe4)
         assert struct.unpack_from('>I', m.data, vt)[0] == 0x3f6e4, 'sidebar vtable not found'
+    overrides = TIGER_STYLE_OVERRIDES.get(style, {})
     entries = place_tiger_cave(m, data, names, quiet)
-    for name, addr, expect, new, why in TIGER_PATCHES + TIGER_STRIPES_PATCHES:
+    for name, addr, expect, new, why in TIGER_PATCHES + TIGER_STRIPES_PATCHES + TIGER_HEADER_PATCHES + TIGER_WELL_PATCHES:
         if name not in names:
             continue
-        if stripes and addr in TIGER_STRIPES_OVERRIDES:
-            new = TIGER_STRIPES_OVERRIDES[addr]
+        if addr in overrides:
+            new = overrides[addr]
             if new is None:
                 continue
-            why += ' (stripes)'
+            why += ' (%s)' % style
         off = m.addr2off(addr)
         cur = struct.unpack_from('>I', data, off)[0]
         if cur != expect:
@@ -358,12 +440,16 @@ def apply_tiger(m, path_out, names, quiet):
             disp = entries[new[1] + '_gray'] - 0x320000
             assert -0x8000 <= disp < 0x8000
             new = (expect & 0xffff0000) | (disp & 0xffff)
+        elif isinstance(new, tuple) and new[0] == 'lfs_cave_reg':   # lfs f<reg>,lo(r2), r2 = 0x320000
+            disp = entries[new[2]] - 0x320000
+            assert -0x8000 <= disp < 0x8000
+            new = (48 << 26) | (new[1] << 21) | (2 << 16) | (disp & 0xffff)
         struct.pack_into('>I', data, off, new)
         if not quiet:
             print('%-9s %08x file+%06x  %08x -> %08x  %s' % (name, addr, off, expect, new, why))
     # 'statusbar' and 'slimbar' have nothing to do in Tiger (no metal branch
     # in its eraser; with 'topbar' there is no bottom bar to slim)
-    todo = [n for n in names if n not in TIGER_SET_NAMES + ['stripes'] and n not in ('statusbar', 'slimbar')]
+    todo = [n for n in names if n not in TIGER_SET_NAMES + STYLE_SET_NAMES and n not in ('statusbar', 'slimbar')]
     # (every set is ported now; this only reports a set name it doesn't know)
     if todo and not quiet:
         print('Tiger 10.4.11: not ported yet, skipped: %s' % ', '.join(todo))
@@ -480,7 +566,7 @@ def stub_addr(m, name):
     sys.exit('import %s not found' % name)
 
 
-def place_cave(m, data, hook, quiet):
+def place_cave(m, data, hook, quiet, keep_last_row=False):
     """Write tools/cave.py's routine + constants into the free space at the
     end of __TEXT.
     Returns {'addr': routine, 'gray': the line gray (float)}."""
@@ -489,7 +575,7 @@ def place_cave(m, data, hook, quiet):
     seg = [x for x in m.segments if x['name'] == '__TEXT'][0]
     caddr = (last + 15) & ~15
     stubs = {nm: stub_addr(m, nm) for nm in cave.STUBS_NEEDED}
-    code, grays = cave.build_topbar(caddr, hook, stubs)
+    code, grays = cave.build_topbar(caddr, hook, stubs, keep_last_row=keep_last_row)
     coff = m.addr2off(caddr)
     room = seg['vmaddr'] + seg['filesize'] - caddr
     if len(code) > room:
@@ -512,7 +598,7 @@ def bl_target(data, m, a):
     return a + disp
 
 
-def place_divider_erase(m, data, sites, quiet, stripes=False):
+def place_divider_erase(m, data, sites, quiet, style=None):
     """Write cave.build_divider_erase() into EraseViewBackground's metal
     branch, which the 'statusbar' set makes unreachable (it starts right after
     the branch we make unconditional and ends at the Aqua branch). With
@@ -522,12 +608,16 @@ def place_divider_erase(m, data, sites, quiet, stripes=False):
     start, end = sites[0x23b0c] + 4, sites[0x23b90]
     ext = sites[FRAMEDBOX_SKIP] + FRAMEDBOX_STUB    # after place_divider's stub
     stubs = {nm: stub_addr(m, nm) for nm in cave.DIVIDER_STUBS}
-    brush = cave.TOOLBAR_BRUSH if stripes else cave.DIVIDER_BRUSH
-    code, back = cave.build_divider_erase(start, stubs, bl_target(data, m, sites[DIVIDER_FRAME_CALL]), ext, brush)
+    brush = cave.TOOLBAR_BRUSH if style in ('stripes', 'well') else cave.DIVIDER_BRUSH
+    code, back = cave.build_divider_erase(start, stubs, bl_target(data, m, sites[DIVIDER_FRAME_CALL]), ext, brush,
+                                          bottom_row=style == 'well')
     assert len(code) <= end - start, 'divider erase too big for the dead branch'
     off = m.addr2off(start)
     data[off:off + len(code)] = code
-    tail = cave.build_divider_outset(ext, back, stubs, 0 if stripes else 1)
+    if style == 'well':
+        tail = cave.build_divider_outset_well(ext, back, stubs, sites[WELL_DRAWSELF_ERASE] + 4)
+    else:
+        tail = cave.build_divider_outset(ext, back, stubs, 0 if style else 1)
     assert ext + len(tail) <= sites[FRAMEDBOX_RESUME], 'divider outset too big for the framed-box section'
     data[m.addr2off(ext):m.addr2off(ext) + len(tail)] = tail
     if not quiet:
@@ -836,20 +926,7 @@ def place_stripes(m, data, quiet):
     write(ITEM_FILL[0], cave.build_stripes_call(ITEM_FILL[0], ITEM_FILL[1], 27, 28, entry, copy_reg=29)[0])
     write(DRAG_FILL[0], cave.build_stripes_call(DRAG_FILL[0], DRAG_FILL[1], 26, 30, entry, copy_reg=31,
                                                 setup=[cave.d_form(14, 31, 1, 0x50)])[0])   # addi r31,r1,0x50
-    # no pane margin
-    for a in MARGIN_FLAG_SITES:
-        assert w(a) >> 26 == 14 and (w(a) >> 16) & 31 == 0 and w(a) & 0xffff == 1, 'margin flag site %x' % a
-        assert any(w(a - 4 * k) >> 26 == 32 and w(a - 4 * k) & 0xffff == 0xdc for k in range(1, 12)), 'margin flag %x' % a
-        put(a, w(a) & 0xffff0000)
-    assert w(MARGIN_BRANCH) == 0x41be0108 and w(MARGIN_BRANCH - 8) & 0xffff == 0xdc
-    put(MARGIN_BRANCH, 0x48000108)
-    # the divider image centered on the divider's height
-    a, end = CENTER_DRAW
-    assert [w(a + 4 * k) for k in (0, 1, 2, 4, 6, 9)] == [0xed8a0032, 0xc1a10078, 0xed690032, 0x80610044, 0xc181007c, 0xc1610070]
-    assert w(end) == 0x7c9d84aa and w(end + 12) == 0x7c9d84aa, 'divider clip/draw rects'
-    assert w(0x22498) == 0xcbe2cab8 and w(0x22514) == 0xc121005c, 'f31 = 2^52, f9 = image height'
-    write(a, cave.build_centered_draw(a, end))
-    put(end, (31 << 26) | (4 << 21) | (28 << 16) | (16 << 11) | (597 << 1))   # lswi r4,r28,16: the clip's copy
+    place_no_margin(m, data)
     # scrolling: ScrollBits -> Refresh
     slot, rel, other = scrollbits_relocation(m, data)
     o = m.addr2off(SCROLLBITS_THUNK)
@@ -865,6 +942,206 @@ def place_stripes(m, data, quiet):
         print('stripes   ScrollBits slot %x -> %x (Refresh), relocation moved to %x' % (slot, SCROLLBITS_THUNK, other))
 
 
+def place_no_margin(m, data, margin=0):
+    """The sidebar styles' layout (see 'stripes' above): no pane margin (or
+    `margin` px, 'well'), the divider image centered on the divider's height."""
+    import cave
+    w = lambda a: struct.unpack_from('>I', data, m.addr2off(a))[0]
+    put = lambda a, word: struct.pack_into('>I', data, m.addr2off(a), word)
+    def write(a, code):
+        data[m.addr2off(a):m.addr2off(a) + len(code)] = code
+    # the pane margin
+    for a in MARGIN_FLAG_SITES:
+        assert w(a) >> 26 == 14 and (w(a) >> 16) & 31 == 0 and w(a) & 0xffff == 1, 'margin flag site %x' % a
+        assert any(w(a - 4 * k) >> 26 == 32 and w(a - 4 * k) & 0xffff == 0xdc for k in range(1, 12)), 'margin flag %x' % a
+        put(a, (w(a) & 0xffff0000) | margin)
+    assert w(MARGIN_BRANCH) == 0x41be0108 and w(MARGIN_BRANCH - 8) & 0xffff == 0xdc
+    if not margin:                     # (with one, its invalidation stays)
+        put(MARGIN_BRANCH, 0x48000108)
+    # the divider image centered on the divider's height
+    a, end = CENTER_DRAW
+    assert [w(a + 4 * k) for k in (0, 1, 2, 4, 6, 9)] == [0xed8a0032, 0xc1a10078, 0xed690032, 0x80610044, 0xc181007c, 0xc1610070]
+    assert w(end) == 0x7c9d84aa and w(end + 12) == 0x7c9d84aa, 'divider clip/draw rects'
+    assert w(0x22498) == 0xcbe2cab8 and w(0x22514) == 0xc121005c, 'f31 = 2^52, f9 = image height'
+    write(a, cave.build_centered_draw(a, end))
+    put(end, (31 << 26) | (4 << 21) | (28 << 16) | (16 << 11) | (597 << 1))   # lswi r4,r28,16: the clip's copy
+
+
+# --- 'header': the sidebar under an Aqua list header (Panther 10.3.9; see
+# cave.build_sidebar_header and tools/header.py). On 'stripes'' layout:
+#  - The divider (7 px) is erased white, its image a 1 px line by the files
+#    (grip.py header_divider_png): the sidebar looks 6 px wider, with a line.
+#  - The sidebar starts HEADER_ROWS - 1 lower (the header's first row is the
+#    status bar's last, EDGE_PATCHES) and is as much shorter: placed so when
+#    the window is laid out, and its height, then and on every resize, the
+#    splitter's - those rows. (Dragging the divider changes only its width.)
+#    The file pane's column header is in line with ours.
+#  - The splitter's DrawSelf draws the header in those rows (the first of its
+#    pane outline calls, nops since 'gap', calls SidebarHeader): the active
+#    or the inactive window's (its label gray). SidebarHeader lives in the
+#    pane outline routine itself (dead since 'gap') and the fake background
+#    draw (unused here: no stripes); its statics in __DATA's zero-fill tail,
+#    past __common.
+HEADER_ROWS = 17
+_HD = HEADER_ROWS - 1                  # the header's first row is the status bar's last (EDGE_*)
+# The top edge of 'header' and 'well' (cave.EDGE_*): the status bar leaves its
+# last row to the splitter, which draws it in the DrawSelf call below (also
+# with the sidebar collapsed); the file pane starts a row higher, under it,
+# so its own first row is hidden (the list header's line, the icon view's
+# white) and scrolls with nothing of ours in it.
+EDGE_PATCHES = [     # (10.3.9 address, word before (with 'stripes'' layout), new word, comment)
+    (0x4815c, 0x7fc5f378, 0x38a0ffff, 'layout: file pane y = margin -> -1 (under the top edge)'),
+    (0x48194, 0x7cbd2850, 0x38a50001, 'layout: file pane height = H - 2m -> H + 1'),
+    (0x48c44, 0x7fc5f378, 0x38a0ffff, 'file pane: y = margin -> -1 (under the top edge)'),
+    (0x48c64, 0x7ca02850, 0x38a50001, 'file pane: height = H - 2m -> H + 1'),
+    (0x22574, 0x409e0014, NOP, 'DrawSelf: skip the first outline call when collapsed -> always (the top edge)'),
+]
+HEADER_PATCHES = EDGE_PATCHES + [   # (10.3.9 address, expected word, new word, comment)
+    (0x48110, 0x7fc5f378, 0x38be0000 | _HD, 'layout: sidebar y = margin -> margin + header rows - 1 (addi r5,r30,16)'),
+    (0x48138, 0x7ca50734, 0x38a50000 | (-_HD & 0xffff), 'layout: sidebar height -= header rows - 1 (addi r5,r5,-16)'),
+    (0x48a98, 0x7c090050, 0x30000000 | (-_HD & 0xffff), 'resize: sidebar height = splitter - header rows + 1 (addic r0,r0,-16; margin 0)'),
+]
+HEADER_CALL = 0x22584                  # DrawSelf: bl <outline the sidebar> ('gap': nop), r3 = splitter, r4 = ctx
+HEADER_LOADER = 0x2227c                # sub_2227c(&holder, handle): CGImage from a 'PNG ' handle (the grip's loader)
+HEADER_STATICS = 0x325de0              # 16 bytes past __common (0x3257d0 + 0x608), in __DATA's vm size
+OUTLINE_FN = (0x20788, 0x2081c)        # sub_20788, a pane's outline: called only from DrawSelf's two nopped calls
+
+
+def data_tail_free(m, addr, n):
+    """True if [addr, addr + n) lies past every __DATA section, inside the
+    segment's vm size (zero-filled memory nothing else uses)."""
+    seg = [x for x in m.segments if x['name'] == '__DATA'][0]
+    last = max(x['addr'] + x['size'] for x in m.sections if x['seg'] == '__DATA')
+    return last <= addr and addr + n <= seg['vmaddr'] + seg['vmsize']
+
+
+def place_header(m, data, fix, quiet):
+    import cave, header
+    w = lambda a: struct.unpack_from('>I', data, m.addr2off(a))[0]
+    put = lambda a, word: struct.pack_into('>I', data, m.addr2off(a), word)
+    assert fix, "'header' needs 'topbar' (its port rect converter)"
+    place_no_margin(m, data)
+    for a, expect, new, why in HEADER_PATCHES:
+        assert w(a) == expect, 'header: %08x is %08x, not %08x (%s)' % (a, w(a), expect, why)
+        put(a, new)
+        if not quiet:
+            print('header    %08x file+%06x  %08x -> %08x  %s' % (a, m.addr2off(a), expect, new, why))
+    assert w(HEADER_CALL) == NOP and w(HEADER_CALL - 12) == 0x7fe3fb78 and w(HEADER_CALL - 8) == 0x80810044, 'header call site'
+    assert w(HEADER_LOADER) == 0x7c0802a6 and w(HEADER_LOADER + 0x60) >> 26 == 18, 'image loader'
+    assert w(FAKEBG[0]) == 0x7c0802a6 and w(FAKEBG[1] - 4) == 0x4e800020, 'fake background draw'
+    assert struct.unpack_from('>II', data, m.addr2off(RET1)) == (0x38600001, 0x4e800020)
+    assert data_tail_free(m, HEADER_STATICS, 16), 'no room for the header statics'
+    stubs = {nm: stub_addr(m, nm) for nm in cave.SIDEBAR_HEADER_STUBS}
+    head, tail, rest = style_regions(m, data)
+    pieces = cave.build_sidebar_header(head[0], tail[0], rest[0], HEADER_STATICS, HEADER_LOADER,
+                                       bl_target(data, m, DIVIDER_FRAME_CALL), fix[1]['port'], stubs,
+                                       header.HEADER_ID, HEADER_ROWS, header.HEADER_WIDTH)
+    write_style_pieces(m, data, (head, tail, rest), pieces, 'SidebarHeader', quiet)
+    put(HEADER_CALL, 0x48000001 | ((head[0] - HEADER_CALL) & 0x03fffffc))
+    if not quiet:
+        print('header    %08x file+%06x  DrawSelf: nop -> bl SidebarHeader; statics at %08x' % (
+            HEADER_CALL, m.addr2off(HEADER_CALL), HEADER_STATICS))
+
+
+def style_regions(m, data):
+    """The three dead stretches the 'header' and 'well' routines live in, as
+    (start, end): the pane outline routine (dead since 'gap'), the fake
+    background draw after its `b RET1` (unused without 'stripes'), and the
+    tail of the View loader's two blocks after 'toolbar''s loop."""
+    w = lambda a: struct.unpack_from('>I', data, m.addr2off(a))[0]
+    head, end = OUTLINE_FN
+    assert w(head) == 0x7c0802a6 and w(end - 4) == 0x4e800020 and w(end) == 0x7c0802a6, 'pane outline routine'
+    assert w(HEADER_CALL + 16) == NOP, "the other outline call: 'gap''s nop"
+    assert w(FAKEBG[0]) == 0x7c0802a6 and w(FAKEBG[1] - 4) == 0x4e800020, 'fake background draw'
+    assert struct.unpack_from('>II', data, m.addr2off(RET1)) == (0x38600001, 0x4e800020)
+    lo = VIEW_LOADER_LANDING
+    assert w(lo - 4) == NOP, "'header' and 'well' need 'toolbar' (the View loader's free tail)"
+    while w(lo - 4) == NOP:
+        lo -= 4
+    return (head, end), (FAKEBG[0] + 4, FAKEBG[1]), (lo, VIEW_LOADER_LANDING)
+
+
+def write_style_pieces(m, data, regions, pieces, name, quiet):
+    import cave
+    for k, ((a, e), code) in enumerate(zip(regions, pieces)):
+        assert len(code) <= e - a, '%s piece %d (%d bytes) does not fit %x..%x' % (name, k, len(code), a, e)
+        blob = code + struct.pack('>I', NOP) * ((e - a - len(code)) // 4)
+        if a == FAKEBG[0] + 4:             # the fake background draw draws nothing
+            b = cave.Asm(FAKEBG[0]); b.b(RET1)
+            blob = b.assemble() + blob
+            a = FAKEBG[0]
+        data[m.addr2off(a):m.addr2off(a) + len(blob)] = blob
+        if not quiet:
+            print('%-9s %08x file+%06x  %d bytes (%s, piece %d), %d free' % (
+                name[:9].lower(), regions[k][0], m.addr2off(regions[k][0]), len(code), name, k + 1,
+                regions[k][1] - regions[k][0] - len(code)))
+
+
+
+# --- 'well': the sidebar as a white inset list on the window's pinstripes,
+# framed like an Aqua list box (Panther 10.3.9; see cave.build_well_frame).
+# The splitter's pane margin (its +0xdc flag's 1 px, which 'stripes' makes 0)
+# is WELL_MARGIN for the sidebar: it sits that far in from the splitter's
+# left, top and bottom edges. The divider, right after the sidebar's frame
+# line, is WELL_MARGIN wide (its image: stripes, then the 1 px line), and the
+# file pane starts right after it, with no margin, as with 'stripes':
+#   sidebar   x = m, y = 0, width w, height H - m         (m = WELL_MARGIN)
+#   divider   left = w + m + 1, right = left + m          (collapsed: 0, m)
+#   files     x = w + 2m + 1 (collapsed: m), y = -1, the rest of the splitter
+# (y 0 and -1: the frame's top line and the files' top edge are the status
+# bar's last row, EDGE_PATCHES.)
+# The layout's other readers of the margin follow: the widest sidebar, and
+# the sidebar's width while the divider is dragged (left - m - 1). The ring
+# of margin the layout invalidates around a pane grows to m.
+WELL_MARGIN = 5
+WELL_DRAWSELF_ERASE = 0x22420          # DrawSelf: bl DividerErase ('gap'), its return address + 4
+_M = WELL_MARGIN
+WELL_PATCHES = [   # (10.3.9 address, word before (with 'stripes'' layout), new word, comment)
+    (0x48110, 0x7fc5f378, 0x38a00000, 'layout: sidebar y = m -> 0 (the frame top: the top edge)'),
+    (0x48130, 0x7cbd2850, 0x7cbe2850, 'layout: sidebar height = H - 2m -> H - m'),
+    (0x48a98, 0x7c090050, 0x7c1c0050, 'resize: sidebar height = H - 2m -> H - m'),
+    (0x48154, 0x1c1e0003, 0x57c0083c, 'layout: file pane x = w + 3m + 7 -> w + 2m + 1 (mulli 3 -> slwi 1)'),
+    (0x4816c, 0x38840007, 0x38840001, 'layout: file pane x: + 7 -> + 1'),
+    (0x4817c, 0x57c2103a, 0x57c2083c, 'layout: file pane width = W - w - 4m - 7 -> - 2m - 1 (slwi 2 -> 1)'),
+    (0x48198, 0x3884fff9, 0x3884ffff, 'layout: file pane width: - 7 -> - 1'),
+    (0x48378, 0x5442083c, 0x38420001, 'divider: left = w + 2m -> w + m + 1'),
+    (0x48388, 0x38420007, 0x38420000 | _M, 'divider: right = left + 7 -> + m'),
+    (0x4839c, 0x38000007, 0x38000000 | _M, 'divider, sidebar collapsed: right = 7 -> m'),
+    (0x48a8c, 0x38420007, 0x38420001, 'resize: room for the divider 7 -> 1 (+ 2m)'),
+    (0x48ab0, 0x3842fff9, 0x3842ffff, 'resize: sidebar width - 7 -> - 1 (- 2m)'),
+    (0x48c1c, 0x3bfe0007, 0x3bfe0000, 'file pane, sidebar collapsed: x = m + 7 -> m'),
+    (0x48c2c, 0x1c1e0003, 0x57c0083c, 'file pane: x = w + 3m + 7 -> w + 2m + 1 (mulli 3 -> slwi 1)'),
+    (0x48c34, 0x3be20007, 0x3be20001, 'file pane: x: + 7 -> + 1'),
+    (0x48c68, 0x7c9e2050, NOP, 'file pane: width = W - x - m -> W - x'),
+    (0x48cbc, 0x38400001, 0x38400000 | _M, 'widest sidebar: margin 1 -> m'),
+    (0x48cdc, 0x3863fff9, 0x3863ffff, 'widest sidebar: W - d0 - 2m - 7 -> - 1'),
+    (0x2b80c, 0x5760083c, 0x381b0001, 'divider drag: sidebar width = left - 2m -> left - m - 1'),
+    (0x485cc, 0x38a0ffff, 0x38a00000 | (-_M & 0xffff), 'invalidate: the ring around a pane, 1 -> m px (v)'),
+    (0x485d0, 0x3880ffff, 0x38800000 | (-_M & 0xffff), 'invalidate: the ring around a pane, 1 -> m px (h)'),
+] + EDGE_PATCHES
+
+
+def place_well(m, data, fix, quiet):
+    import cave
+    w = lambda a: struct.unpack_from('>I', data, m.addr2off(a))[0]
+    put = lambda a, word: struct.pack_into('>I', data, m.addr2off(a), word)
+    assert fix, "'well' needs 'topbar' (its port rect converter)"
+    place_no_margin(m, data, WELL_MARGIN)
+    for a, expect, new, why in WELL_PATCHES:
+        assert w(a) == expect, 'well: %08x is %08x, not %08x (%s)' % (a, w(a), expect, why)
+        put(a, new)
+        if not quiet:
+            print('well      %08x file+%06x  %08x -> %08x  %s' % (a, m.addr2off(a), expect, new, why))
+    assert w(HEADER_CALL) == NOP and w(HEADER_CALL - 12) == 0x7fe3fb78 and w(HEADER_CALL - 8) == 0x80810044, 'frame call site'
+    stubs = {nm: stub_addr(m, nm) for nm in cave.WELL_FRAME_STUBS}
+    head, tail, rest = style_regions(m, data)
+    pieces = cave.build_well_frame(head[0], tail[0], rest[0], bl_target(data, m, DIVIDER_FRAME_CALL), fix[1]['port'],
+                                   stubs, WELL_MARGIN)
+    write_style_pieces(m, data, (head, tail, rest), pieces, 'WellFrame', quiet)
+    put(HEADER_CALL, 0x48000001 | ((head[0] - HEADER_CALL) & 0x03fffffc))
+    if not quiet:
+        print('well      %08x file+%06x  DrawSelf: nop -> bl WellFrame' % (HEADER_CALL, m.addr2off(HEADER_CALL)))
+
 def apply(path_in, path_out, names=SET_NAMES, quiet=False):
     m = MachO(path_in)
     if is_tiger(m):
@@ -876,12 +1153,12 @@ def apply(path_in, path_out, names=SET_NAMES, quiet=False):
     if 'topbar' in names:
         assert 'shadow' in names and 'slimbar' in names, "'topbar' needs 'shadow' and 'slimbar'"
     if 'shadow' in names or 'softlines' in names:
-        cv = place_cave(m, data, sites[0x23b90], quiet)
+        cv = place_cave(m, data, sites[0x23b90], quiet, keep_last_row=style_of(names) in ('header', 'well'))
     fix = build_topbar_fix(m, data, sites) if 'topbar' in names else None
     divider = None
     if 'gap' in names:
         assert 'statusbar' in names, "'gap' needs 'statusbar' (its helper lives in the dead metal branch)"
-        divider = place_divider_erase(m, data, sites, quiet, stripes='stripes' in names)
+        divider = place_divider_erase(m, data, sites, quiet, style=style_of(names))
         free = place_divider(m, data, sites, quiet, cg_entry=fix[1]['port'] if fix else None)
     if 'barupdate' in names:
         assert 'gap' in names, "'barupdate' needs 'gap' (it lives after the splitter bar draw)"
@@ -889,11 +1166,11 @@ def apply(path_in, path_out, names=SET_NAMES, quiet=False):
         place_barupdate(m, data, sites, free, cv['free'], quiet)
     if 'toolbar' in names:
         place_view_loader(m, data, sites, quiet)
-    stripes = 'stripes' in names
-    if stripes:
-        assert all(n in names for n in ('gap', 'topbar', 'slimbar', 'statusbar')), "'stripes' needs 'gap' and 'topbar'"
-        assert all(sites[a] == a for a in STRIPES_WIDTH_SITES), "'stripes' is for Finder 10.3.9 only"
-    for p in (stripes_patches(PATCHES) if stripes else PATCHES):
+    style = style_of(names)
+    if style:
+        assert all(n in names for n in ('gap', 'topbar', 'slimbar', 'statusbar')), "'%s' needs 'gap' and 'topbar'" % style
+        assert all(sites[a] == a for a in STRIPES_WIDTH_SITES), "'%s' is for Finder 10.3.9 only" % style
+    for p in (stripes_patches(PATCHES) if style else PATCHES):
         name, refaddr, expect, action, why = p
         if name not in names:
             continue
@@ -936,8 +1213,12 @@ def apply(path_in, path_out, names=SET_NAMES, quiet=False):
             print('%-9s %08x file+%06x  %08x -> %08x  %s' % (name, addr, off, cur, new, why))
     if fix:
         write_topbar_fix(m, data, fix, quiet)
-    if stripes:
+    if style == 'stripes':
         place_stripes(m, data, quiet)
+    elif style == 'header':
+        place_header(m, data, fix, quiet)
+    elif style == 'well':
+        place_well(m, data, fix, quiet)
     open(path_out, 'wb').write(bytes(data))
     return sites
 

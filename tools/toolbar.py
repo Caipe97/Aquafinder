@@ -311,15 +311,22 @@ def tiger_id(pid):
     return pid
 
 
-def build_tiger(finder_rsrc):
+def build_tiger(finder_rsrc, style=None):
     """Tiger's Finder.rsrc with Jaguar's toolbar buttons: Gear and Path
-    replaced (appended, rsrc.with_replaced), Back/Forward and View added."""
+    replaced (appended, rsrc.with_replaced), Back/Forward and View added.
+    style 'header' (the sidebar style, patch.py) also adds the sidebar's list
+    header, 'PNG ' 8802 and 8803 (tools/header.py)."""
+    import header
     rf = ResFile(finder_rsrc)
     assert ('PNG ', TIGER_ARROWS) not in rf.res and ('PNG ', TIGER_VIEW) not in rf.res, 'not a stock Tiger Finder.rsrc'
     buttons = {('PNG ', i): b for i, b in build(finder_rsrc, tiger_id, GEAR).items()}
     like = rf.res[('PNG ', GEAR)]['data']
     for k, im in group_images().items():
         buttons[('PNG ', TIGER_GROUP + k)] = png(im, like)
+    if style == 'header':
+        for k in (0, 1):
+            assert ('PNG ', header.HEADER_ID + k) not in rf.res
+            buttons[('PNG ', header.HEADER_ID + k)] = header.header_png(like, inactive=bool(k))
     out = rf.with_replaced({k: b for k, b in buttons.items() if k in rf.res})
     for k, b in sorted(buttons.items()):
         if k not in rf.res:

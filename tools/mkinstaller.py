@@ -4,8 +4,11 @@ components (files are recognised by fingerprint, so one script serves both):
 
   finder     Aqua (non-brushed-metal) Finder windows with toolbar + sidebar,
              the status bar under the toolbar and the toolbar buttons (Jaguar)
-  stripes    option for finder: a pinstriped sidebar with a slim, shadowed
-             divider (patch.py 'stripes'; on Panther also grip.py stripes)
+  stripes    sidebar styles of finder, one at a time (none: the plain sidebar):
+  header     pinstriped with a slim, shadowed divider ('stripes'), under an
+  well       Aqua list header ('header'), or an inset list on pinstripes
+             ('well'); patch.py's style sets, on Panther also grip.py's
+             images for each
   titlebars  Jaguar's pinstriped, translucent title bars (theme Extras.rsrc,
              plus AppKit so Cocoa windows can show the translucency)
   logo       Jaguar branding: the Garamond "Mac OS X" wordmark in About This
@@ -114,13 +117,16 @@ def text_region(path, a, b, outside=()):
     return skip, count, md5(a[lo:hi]), md5(b[lo:hi])
 
 entries = []   # (component, key, label, skip, count, orig md5, patched md5, edit lines)
-# The Finder and its resources come in two styles: plain (the default) and,
-# with the optional 'stripes' set, the pinstriped sidebar. Both
-# styles share a key (so one backup); the stripes edits are listed under
-# <key>stripes. styled: (component, key, label, skip, count, orig, plain md5,
-# stripes md5 or None)
+# The Finder and its resources come in sidebar styles: plain (the default),
+# and patch.STYLE_SET_NAMES' (STYLES). All styles of a file share its key (so
+# one backup); a style's edits are listed under <key><style>. styled:
+# (component, key, label, skip, count, orig, {style: md5}), style None for
+# plain; a style missing from the dict has no build of that file (plain
+# stands in); styles may share a fingerprint (Tiger's Finder.rsrc).
 assert patch.STRIPES_WIDTH == grip.STRIPES_WIDTH
-STRIPES_BUILDS = ('10.3.9', '10.4.11')
+STYLES = patch.STYLE_SET_NAMES
+STYLE_LABELS = {'stripes': 'pinstriped sidebar', 'header': 'sidebar header', 'well': 'inset sidebar'}
+STYLE_BUILDS = ('10.3.9', '10.4.11')
 styled = []
 for ver, rel in FINDER_BUILDS:
     src = os.path.join(ROOT, rel)
@@ -131,31 +137,46 @@ for ver, rel in FINDER_BUILDS:
     b = open(out, 'rb').read()
     skip, count, mo, mp = text_region(src, a, b)
     entries.append(('finder', key, lbl, skip, count, mo, mp, edit_lines(a, b)))
-    ms = None
-    if ver in STRIPES_BUILDS:
-        out = os.path.join(ROOT, 'build', 'Finder-%s-stripes' % ver)
-        patch.apply(src, out, patch.SET_NAMES + ['stripes'], quiet=True)
-        b = open(out, 'rb').read()
-        sk2, cn2, mo2, ms = text_region(src, a, b, patch.stripes_outside_text(MachO(src)))
-        assert (sk2, cn2, mo2) == (skip, count, mo)
-        entries.append(('finder', key + 'stripes', lbl + ', pinstriped sidebar', skip, count, mo, ms, edit_lines(a, b)))
-    styled.append(('finder', key, lbl, skip, count, mo, mp, ms))
+    hashes = {None: mp}
+    if ver in STYLE_BUILDS:
+        for st in STYLES:
+            out = os.path.join(ROOT, 'build', 'Finder-%s-%s' % (ver, st))
+            patch.apply(src, out, patch.SET_NAMES + [st], quiet=True)
+            b = open(out, 'rb').read()
+            outside = patch.stripes_outside_text(MachO(src)) if st == 'stripes' else []
+            sk2, cn2, mo2, ms = text_region(src, a, b, outside)
+            assert (sk2, cn2, mo2) == (skip, count, mo)
+            entries.append(('finder', key + st, '%s, %s' % (lbl, STYLE_LABELS[st]), skip, count, mo, ms, edit_lines(a, b)))
+            hashes[st] = ms
+    styled.append(('finder', key, lbl, skip, count, mo, hashes))
 
-# The Finder's resources: on Panther the sidebar divider's image, the column
-# view's divider instead of the metal dimple, or the pinstriped sidebar's, and
-# Jaguar's toolbar buttons (installed and restored with the Finder).
+# The Finder's resources: on Panther the sidebar divider's image (the column
+# view's divider instead of the metal dimple, or a style's), the sidebar
+# header's images ('header'), and Jaguar's toolbar buttons (installed and
+# restored with the Finder).
 a = open(os.path.join(ROOT, GRIP_SRC), 'rb').read()
 b = grip.build(a)
 entries.append(('grip', 'finderrsrc', 'Finder images', 0, 0, md5(a), md5(b), edit_lines(a, b)))
-c = grip.build(a, stripes=True)
-entries.append(('grip', 'finderrsrcstripes', 'Finder images, pinstriped sidebar', 0, 0, md5(a), md5(c), edit_lines(a, c)))
-styled.append(('grip', 'finderrsrc', 'Finder images', 0, 0, md5(a), md5(b), md5(c)))
-# Tiger's: Jaguar's toolbar buttons (toolbar.build_tiger; Tiger draws its
-# sidebar divider in code, so there is one style)
+hashes = {None: md5(b)}
+for st in STYLES:
+    c = grip.build(a, st)
+    entries.append(('grip', 'finderrsrc' + st, 'Finder images, ' + STYLE_LABELS[st], 0, 0, md5(a), md5(c), edit_lines(a, c)))
+    hashes[st] = md5(c)
+styled.append(('grip', 'finderrsrc', 'Finder images', 0, 0, md5(a), hashes))
+# Tiger's: Jaguar's toolbar buttons (toolbar.build_tiger), and for 'header'
+# the sidebar header's images (Tiger draws its sidebar dividers in code, so
+# the other styles share the plain file)
 a = open(os.path.join(ROOT, TIGER_GRIP_SRC), 'rb').read()
 b = toolbar.build_tiger(a)
 entries.append(('grip', 'finderrsrctiger', 'Finder images 10.4.11', 0, 0, md5(a), md5(b), edit_lines(a, b)))
-styled.append(('grip', 'finderrsrctiger', 'Finder images 10.4.11', 0, 0, md5(a), md5(b), None))
+hashes = {None: md5(b)}
+for st in STYLES:
+    c = toolbar.build_tiger(a, st)
+    if c != b:
+        entries.append(('grip', 'finderrsrctiger' + st, 'Finder images 10.4.11, ' + STYLE_LABELS[st], 0, 0, md5(a), md5(c),
+                        edit_lines(a, c)))
+    hashes[st] = md5(c)
+styled.append(('grip', 'finderrsrctiger', 'Finder images 10.4.11', 0, 0, md5(a), hashes))
 
 import contextlib, io
 # Tiger's title bar, toolbar and spinner art is Panther's (byte for byte), so
@@ -225,28 +246,36 @@ def ident_block(comp):
         out.append('  esac')
     return '\n'.join(out)
 def styled_ident(comp):
-    """identify_<comp> for a file with two styles: STYLE = the style found
-    (plain or stripes), STATE as usual; then style_target picks WANT/EDITKEY
-    for FINDER_STYLE (keep = the style found, plain for an original file). A
-    file patched in the other style counts as oldpatch, so install re-patches
-    it from the backup. Older releases' fingerprints (tools/released.txt) are
-    plain (the old 'top' status bar option was folded into plain)."""
+    """identify_<comp> for a file with sidebar styles: STYLE = the style found
+    (plain or one of STYLES; none when the file looks the same in several),
+    STATE as usual, R its fingerprint and H_<style> each style's (H_plain
+    plain's; empty: no build of that style, plain stands in); then
+    style_target picks WANT/EDITKEY for FINDER_STYLE (keep = the style found,
+    plain for an original file). A file patched in another style counts as
+    oldpatch, so install re-patches it from the backup. Older releases'
+    fingerprints (tools/released.txt) are plain, or the style their key ends
+    in (the old 'top' status bar option was folded into plain)."""
     out = []
-    for c, key, lbl, skip, count, o, hp, hs in styled:
+    for c, key, lbl, skip, count, o, hashes in styled:
         if c != comp: continue
         spans = {}   # (skip, count) -> [(md5, style)]
         for k, sk, cn, h in released:
-            if k in (key, key + 'top', key + 'stripes') and h not in (hp, hs):
-                spans.setdefault((sk, cn), []).append((h, 'stripes' if k.endswith('stripes') else 'plain'))
-        out.append('  HP=%s; HS=%s' % (hp, hs or ''))
+            st = next((x for x in STYLES if k == key + x), 'plain' if k in (key, key + 'top') else None)
+            if st and h not in hashes.values():
+                spans.setdefault((sk, cn), []).append((h, st))
+        out.append('  ' + '; '.join('H_%s=%s' % (st or 'plain', hashes.get(st, '')) for st in [None] + STYLES))
         out.append('  R=$(region "$1" %d %d)' % (skip, count))
         out.append('  case "$R" in')
         out.append('    %s) STATE=original ;;' % o)
-        # a file with one style (no stripes build) reports none
-        sty = (lambda st: '; STYLE=%s' % st) if hs else (lambda st: '')
-        out.append('    %s) STATE=patched%s ;;' % (hp, sty('plain')))
-        if hs:
-            out.append('    %s) STATE=patched; STYLE=stripes ;;' % hs)
+        # a fingerprint shared by several styles reports none
+        by_hash = {}
+        for st in [None] + STYLES:
+            if st in hashes:
+                by_hash.setdefault(hashes[st], []).append(st or 'plain')
+        sty = lambda sts: '; STYLE=%s' % sts[0] if len(sts) == 1 and len(by_hash) > 1 else ''
+        for h, sts in by_hash.items():
+            out.append('    %s) STATE=patched%s ;;' % (h, sty(sts)))
+        sty = lambda st: '; STYLE=%s' % st if len(by_hash) > 1 else ''
         for h, st in spans.pop((skip, count), []):
             out.append('    %s) STATE=oldpatch%s ;;' % (h, sty(st)))
         out.append('  esac')
@@ -274,8 +303,9 @@ script = r'''#!/bin/sh
 #              the status bar under the toolbar as in Jaguar, and a sidebar divider
 #              drawn like the column view's, and Jaguar's toolbar buttons (plus
 #              the Finder's resources: the divider's image, the buttons)
-#   stripes    option for finder: a pinstriped sidebar with a slim, shadowed
-#              divider (restore stripes puts the plain sidebar back)
+#   stripes    sidebar styles of finder, one at a time: pinstriped with a slim,
+#   header     shadowed divider; under an Aqua list header; or an inset list on
+#   well       pinstripes (restore <style> puts the plain sidebar back)
 #   titlebars  Jaguar-style pinstriped, translucent window title bars
 #              (the HIToolbox theme, plus AppKit so Cocoa windows blend too)
 #
@@ -283,8 +313,8 @@ script = r'''#!/bin/sh
 #   logo       Jaguar branding: Garamond "Mac OS X" in About This Mac and the
 #              login panel, and Jaguar's Finder icon in the Finder and Dock
 #
-#   sudo sh aquafinder.sh install [finder|stripes|titlebars|logo]   (default: all)
-#   sudo sh aquafinder.sh restore [finder|stripes|titlebars|logo]   (default: all)
+#   sudo sh aquafinder.sh install [finder|stripes|header|well|titlebars|logo]   (default: all)
+#   sudo sh aquafinder.sh restore [finder|stripes|header|well|titlebars|logo]   (default: all)
 #
 # install finder (and install all) keeps the Finder's current sidebar style.
 #
@@ -320,19 +350,21 @@ identify() {   # identify <file> <component>: sets KEY LABEL STATE SKIP COUNT WA
   [ -f "$1" ] || die "missing $1"
   KEY=; LABEL=; STATE=unknown; STYLE=; EDITKEY=; SWITCH=; CUR=$(sum "$1")
   case "$2" in
-    finder|stripes) identify_finder "$1" ;;
+    finder|stripes|header|well) identify_finder "$1" ;;
     titlebars) identify_theme "$1" ;;
     appkit)    identify_appkit "$1" ;;
     grip)      identify_grip "$1" ;;
     logo)      identify_logo "$1" ;;
   esac
 }
-style_name() { case "$1" in stripes) echo pinstriped ;; *) echo "$1" ;; esac; }
-style_target() {   # WANT/EDITKEY for FINDER_STYLE (plain|stripes|keep) given the STYLE found
+STYLES="stripes header well"
+style_name() { case "$1" in stripes) echo pinstriped ;; header) echo "header" ;; well) echo "inset" ;; *) echo "$1" ;; esac; }
+style_target() {   # WANT/EDITKEY for FINDER_STYLE (plain|<style>|keep) given the STYLE found
   W="${FINDER_STYLE:-keep}"; [ "$W" = keep ] && W="${STYLE:-plain}"
-  [ -z "$HS" ] && W=plain                           # no stripes build of this file
-  if [ "$W" = stripes ]; then WANT=$HS; EDITKEY=${KEY}stripes; else WANT=$HP; EDITKEY=$KEY; fi
-  if [ "$STATE" = patched ] && [ "${STYLE:-plain}" != "$W" ]; then STATE=oldpatch; SWITCH=$W; fi
+  eval "WANT=\$H_$W"
+  [ -z "$WANT" ] && { W=plain; WANT=$H_plain; }      # no build of that style for this file
+  if [ "$WANT" = "$H_plain" ]; then EDITKEY=$KEY; else EDITKEY=$KEY$W; fi
+  if [ "$STATE" = patched ] && [ "$R" != "$WANT" ]; then STATE=oldpatch; SWITCH=$W; fi
 }
 identify_finder() {
 __KNOWN_FINDER__
@@ -430,35 +462,37 @@ finder_style() {   # FINDER_STYLE for install finder: the installed Finder's (pl
   identify "$FINDER" finder; FINDER_STYLE="${STYLE:-plain}"
 }
 
-install_finder() {   # install_finder <finder|stripes>: the Finder and its resources, in FINDER_STYLE
+install_finder() {   # install_finder <finder|style>: the Finder and its resources, in FINDER_STYLE
   finder_style
   install_one "$FINDER" "$1" || RC=1
   install_one "$GRIP" grip || RC=1
   FINDER_STYLE=
 }
 
-stripes_off() {   # restore stripes: a pinstriped sidebar goes back to the plain one
+style_off() {   # restore <style>: that sidebar style goes back to the plain sidebar
   identify "$FINDER" finder
   case "$STATE" in
-    original|unknown) echo "stripes: off (the Aqua Finder isn't installed)."; return 0 ;;
+    original|unknown) echo "$1: off (the Aqua Finder isn't installed)."; return 0 ;;
   esac
-  [ "$STYLE" = stripes ] || { echo "stripes: already off ($LABEL)."; return 0; }
-  FINDER_STYLE=plain; install_finder stripes
+  [ "$STYLE" = "$1" ] || { echo "$1: already off ($LABEL)."; return 0; }
+  FINDER_STYLE=plain; install_finder "$1"
 }
 
-status_stripes() {   # one line for the option: installed = the pinstriped sidebar
+status_styles() {   # one line per style: installed = the Finder's sidebar is in that style
   identify "$FINDER" finder
-  case "$STATE" in
-    unknown) echo "stripes: not recognised (md5 $CUR)" ;;
-    original) echo "stripes: original (Aqua Finder not installed)" ;;
-    *) if [ "$STYLE" = stripes ]; then echo "stripes: Aquafinder installed (pinstriped sidebar)"
-       else echo "stripes: original (plain sidebar)"; fi ;;
-  esac
+  for S in $STYLES; do
+    case "$STATE" in
+      unknown) echo "$S: not recognised (md5 $CUR)" ;;
+      original) echo "$S: original (Aqua Finder not installed)" ;;
+      *) if [ "$STYLE" = "$S" ]; then echo "$S: Aquafinder installed ($(style_name $S) sidebar)"
+         else echo "$S: original ($(style_name ${STYLE:-plain}) sidebar)"; fi ;;
+    esac
+  done
 }
 
 finish() {
   [ -n "$NO_RESTART" ] && return 0
-  case "$CHANGED" in *finder*|*grip*|*stripes*)
+  case "$CHANGED" in *finder*|*grip*|*stripes*|*header*|*well*)
     # no killall without the optional BSD Subsystem; ps is in /bin
     for P in $(ps -axc | awk '$NF == "Finder" {print $1}'); do kill "$P" 2>/dev/null; done
     echo "Finder restarted." ;;
@@ -477,32 +511,33 @@ finish() {
 }
 
 WHAT="${2:-all}"
-case "$WHAT" in finder|stripes|titlebars|logo|all) ;; *) echo "unknown component: $WHAT"; exit 1 ;; esac
+case "$WHAT" in finder|stripes|header|well|titlebars|logo|all) ;; *) echo "unknown component: $WHAT"; exit 1 ;; esac
 want() { [ "$WHAT" = all ] || [ "$WHAT" = "$1" ]; }
+is_style() { case "$1" in stripes|header|well) return 0 ;; esac; return 1; }
 CHANGED=; RC=0
 case "$1" in
   install)
     need_root install
     want finder    && install_finder finder
-    [ "$WHAT" = stripes ] && { FINDER_STYLE=stripes; install_finder stripes; }
+    is_style "$WHAT" && { FINDER_STYLE=$WHAT; install_finder "$WHAT"; }
     want titlebars && { install_one "$THEME" titlebars || RC=1; install_one "$APPKIT" appkit || RC=1; }
     want logo      && for F in $LOGO_FILES; do [ -f "$F" ] || continue; install_one "$F" logo || RC=1; done
     finish ;;
   restore|uninstall)
     need_root restore
     want finder    && { restore_one "$FINDER" finder || RC=1; restore_one "$GRIP" grip || RC=1; }
-    [ "$WHAT" = stripes ] && { stripes_off || RC=1; }
+    is_style "$WHAT" && { style_off "$WHAT" || RC=1; }
     want titlebars && { restore_one "$THEME" titlebars || RC=1; restore_one "$APPKIT" appkit || RC=1; }
     want logo      && for F in $LOGO_FILES; do [ -f "$F" ] || continue; restore_one "$F" logo || RC=1; done
     finish ;;
   status|"")
     status_one "$FINDER" finder
     status_one "$GRIP" grip
-    status_stripes
+    status_styles
     status_one "$THEME" titlebars
     status_one "$APPKIT" appkit
     for F in $LOGO_FILES; do [ -f "$F" ] && status_one "$F" logo; done ;;
-  *) echo "usage: sudo sh $0 [status|install|restore] [finder|stripes|titlebars|logo]"; exit 1 ;;
+  *) echo "usage: sudo sh $0 [status|install|restore] [finder|stripes|header|well|titlebars|logo]"; exit 1 ;;
 esac
 exit $RC
 '''
