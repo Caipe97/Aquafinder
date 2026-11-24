@@ -103,3 +103,23 @@ git fetch origin && git branch -f main origin/main
 ```
 
 The `vX.Y` tag stays on the `topbar` commit. The merge commit on `main` has the same files.
+
+## 8. GitHub release
+
+Publish a release for the tag, with the disk image and the script attached:
+
+```sh
+gh release create vX.Y dist/Aquafinder.dmg dist/aquafinder.sh --verify-tag --latest --title "Aquafinder X.Y" --notes-file notes.md
+```
+
+Write the notes like the earlier releases':
+
+- One line on what Aquafinder is.
+- `## New in X.Y`: what changed, for users, each item saying whether it's on Panther, Tiger or both.
+  If a version was never published as a release, add its own section too.
+- Screenshots of anything new, from `https://raw.githubusercontent.com/Caipe97/Aquafinder/vX.Y/screens/...`.
+- `## Install`: the three installer steps, the Terminal alternative, and that it's only for
+  10.3.9 and 10.4.11.
+- The disk image's checksum, as `md5 dist/Aquafinder.dmg` prints it.
+
+Then download the attached disk image from the release and check that its md5 matches.

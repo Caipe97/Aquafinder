@@ -452,6 +452,8 @@ def apply_tiger(m, path_out, names, quiet):
         struct.pack_into('>I', data, off, new)
         if not quiet:
             print('%-9s %08x file+%06x  %08x -> %08x  %s' % (name, addr, off, expect, new, why))
+    if 'gap' in names:
+        place_separator(m, data, 'tiger', style, quiet)
     # 'statusbar' and 'slimbar' have nothing to do in Tiger (no metal branch
     # in its eraser; with 'topbar' there is no bottom bar to slim)
     todo = [n for n in names if n not in TIGER_SET_NAMES + STYLE_SET_NAMES and n not in ('statusbar', 'slimbar')]
@@ -1098,7 +1100,7 @@ def write_style_pieces(m, data, regions, pieces, name, quiet):
 # The layout's other readers of the margin follow: the widest sidebar, and
 # the sidebar's width while the divider is dragged (left - m - 1). The ring
 # of margin the layout invalidates around a pane grows to m.
-WELL_MARGIN = 5
+WELL_MARGIN = 9
 WELL_DRAWSELF_ERASE = 0x22420          # DrawSelf: bl DividerErase ('gap'), its return address + 4
 _M = WELL_MARGIN
 WELL_PATCHES = [   # (10.3.9 address, word before (with 'stripes'' layout), new word, comment)
@@ -1146,6 +1148,44 @@ def place_well(m, data, fix, quiet):
     put(HEADER_CALL, 0x48000001 | ((head[0] - HEADER_CALL) & 0x03fffffc))
     if not quiet:
         print('well      %08x file+%06x  DrawSelf: nop -> bl WellFrame' % (HEADER_CALL, m.addr2off(HEADER_CALL)))
+
+
+# --- The sidebar's separator line (between the volumes and the places), in
+# every style: it runs from x + start to x + start + w - cut in the item's
+# rect (stock: 3 and 6, so 3 px in from either end of the sidebar). Beside it
+# on the window, the styles leave other margins, so it moves to sit in the
+# middle of what reads as the sidebar:
+#  - plain ('gap'): 1 white column at the window's left edge before the
+#    sidebar (the pane margin), and the divider's gradient right after it:
+#    from x + 2 to x + w - 3, 3 px from either end.
+#  - 'stripes' and 'header': the divider's first 6 columns look like more
+#    sidebar (its stripes and shadow, or white) up to its 1 px line: from
+#    x + 6 to x + w, 6 px from the window's edge and from that line.
+#  - 'well': inside the list box's frame, as stock: 3 px either side.
+# Only existing float constants are loaded (each site is an lfs from the
+# constant pool), so each is a new displacement.
+SEPARATOR_STYLES = {None: (2.0, 5.0), 'stripes': (6.0, 6.0), 'header': (6.0, 6.0), 'well': (3.0, 6.0)}
+SEPARATOR = {   # build: (start site, its word, cut site, its word, {value: pool displacement})
+    'panther': (0x52b94, 0xc002fe58, 0x52c28, 0xc022fed8, {2.0: -0x198, 3.0: -0x1a8, 5.0: -0x1a4, 6.0: -0x128}),
+    'tiger': (0x42b60, 0xc002d43c, 0x42bc4, 0xc002d468, {2.0: -0x2bac, 3.0: -0x2bc4, 5.0: -0x2bc0, 6.0: -0x2b98}),
+}
+
+
+def place_separator(m, data, build, style, quiet):
+    """The separator line's start and cut for `style` (SEPARATOR_STYLES)."""
+    w = lambda a: struct.unpack_from('>I', data, m.addr2off(a))[0]
+    sa, sw, ca, cw, pool = SEPARATOR[build]
+    base = 0x2a0000 if build == 'panther' else 0x320000
+    for v, d in pool.items():   # the constants are what they say
+        assert struct.unpack('>f', struct.pack('>I', w(base + d)))[0] == v, 'separator: no %.1f at %x' % (v, base + d)
+    start, cut = SEPARATOR_STYLES[style]
+    for a, word, v, what in ((sa, sw, start, 'start'), (ca, cw, cut, 'cut')):
+        assert w(a) == word, 'separator %s: %08x is %08x, not %08x' % (what, a, w(a), word)
+        new = (word & 0xffff0000) | (pool[v] & 0xffff)
+        struct.pack_into('>I', data, m.addr2off(a), new)
+        if not quiet and new != word:
+            print('separator %08x file+%06x  %08x -> %08x  %s: %.0f px (%s)' % (
+                a, m.addr2off(a), word, new, what, v, style or 'plain'))
 
 def apply(path_in, path_out, names=SET_NAMES, quiet=False):
     m = MachO(path_in)
@@ -1224,6 +1264,9 @@ def apply(path_in, path_out, names=SET_NAMES, quiet=False):
         place_header(m, data, fix, quiet)
     elif style == 'well':
         place_well(m, data, fix, quiet)
+    if 'gap' in names:
+        assert all(sites[a] == a for a in STRIPES_WIDTH_SITES), 'separator: Finder 10.3.9 only'
+        place_separator(m, data, 'panther', style, quiet)
     open(path_out, 'wb').write(bytes(data))
     return sites
 
