@@ -30,7 +30,11 @@ Make Mac OS X 10.3.9 Panther and 10.4.11 Tiger look and fit better on small scre
     1 px line for a divider. The header's label turns gray in an inactive window, as the file
     list's does.
   - **Inset**: the sidebar as a white list inset on the window's pinstripes, framed like an
-    Aqua list box (as in Jaguar's System Preferences), with a 1 px line by the files.
+    Aqua list box (as in Jaguar's System Preferences), 9 px in from the window's edges, with
+    a 9 px divider of pinstripes ending in a 1 px line by the files.
+
+  In every style, the line between the volumes and the places in the sidebar sits in the
+  middle of what reads as the sidebar, with as much room at either end.
 
   With the list header and the inset sidebar, the item count bar has no line of its own
   under it: the top edge is the sidebar's header or the inset list's frame, and over the files
